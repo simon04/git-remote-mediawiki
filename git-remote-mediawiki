@@ -102,6 +102,10 @@ class CommandError(Exception):
     """Raised when a remote-helper command line does not parse."""
 
 
+class NonFastForward(Exception):
+    """Raised when the wiki rejected an edit because it has moved ahead of us."""
+
+
 class CommandParser(argparse.ArgumentParser):
     """An ArgumentParser that reports errors instead of exiting the helper."""
 
@@ -890,17 +894,22 @@ class GitRemoteMediaWiki:
         try:
             self.wiki.upload(complete_file_name, content, summary)
         except WIKI_ERRORS as error:
-            raise SystemExit(error) from error
+            raise SystemExit(
+                f'Failed to upload {complete_file_name} '
+                f'({type(error).__name__}: {error})'
+            ) from error
         last_file_page = self.wiki.get_page(path)
         newrevid = (last_file_page or {}).get('revid')
         warn(f'Pushed file: {new_sha1} - {complete_file_name}.')
         return newrevid
 
     def mw_push_file(self, diff_info, complete_file_name, summary, oldrevid):
-        """Push one blob; return the new revision id and a status string.
+        """Push one blob and return the resulting MediaWiki revision id.
 
         ``diff_info`` contains a string in this format:
         100644 100644 <sha1_of_blob_before_commit> <sha1_of_blob_now> <status>
+
+        Raises :class:`NonFastForward` if the wiki rejected the edit.
         """
         diff_info_split = diff_info.split()
         newrevid = None
@@ -926,7 +935,7 @@ class GitRemoteMediaWiki:
                 and not self.export_media
             ):
                 warn(f'Ignoring media file related page: {complete_file_name}')
-                return oldrevid, 'ok'
+                return oldrevid
             if page_deleted:
                 # Deleting a page usually requires special privileges. A common
                 # convention is to replace the page with this content instead:
@@ -948,7 +957,7 @@ class GitRemoteMediaWiki:
             except APIError as error:
                 # edit conflicts, considered as non-fast-forward
                 warn(f'Warning: Error {error} from mediawiki.')
-                return oldrevid, 'non-fast-forward'
+                raise NonFastForward from error
             except WIKI_ERRORS as error:
                 # Other errors. Shouldn't happen => just give up.
                 raise SystemExit(f'Fatal: Error {error} from mediawiki') from error
@@ -962,7 +971,7 @@ class GitRemoteMediaWiki:
         else:
             warn(f'Ignoring media file {complete_file_name}')
 
-        return (newrevid or oldrevid), 'ok'
+        return newrevid or oldrevid
 
     def mw_push(self, refspec):
         # multiple push statements can follow each other
@@ -1070,15 +1079,14 @@ class GitRemoteMediaWiki:
             # for the revision
             commit_msg = run_git(['log', '--no-walk', '--format=%s', sha1_commit]).rstrip('\n')
             # Push every blob
-            for info, name in itertools.batched(diff_info_list, 2, strict=True):
-                mw_revision, status = self.mw_push_file(info, name, commit_msg, mw_revision)
-                if status == 'non-fast-forward':
-                    # we may already have sent part of the commit to MediaWiki,
-                    # but it's too late to cancel it. Stop the push in the
-                    # middle, but still give an accurate error message.
-                    return self.error_non_fast_forward(remote)
-                if status != 'ok':
-                    raise SystemExit('Unknown error from mw_push_file()')
+            try:
+                for info, name in itertools.batched(diff_info_list, 2, strict=True):
+                    mw_revision = self.mw_push_file(info, name, commit_msg, mw_revision)
+            except NonFastForward:
+                # we may already have sent part of the commit to MediaWiki, but
+                # it's too late to cancel it. Stop the push in the middle, but
+                # still give an accurate error message.
+                return self.error_non_fast_forward(remote)
             if not self.dumb_push:
                 run_git(
                     [
