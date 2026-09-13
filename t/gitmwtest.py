@@ -130,21 +130,38 @@ class GitMediaWikiTestCase(unittest.TestCase):
         """
         return title.replace('/', '%2F').replace(' ', '_') + '.mw'
 
-    def assertRepositoryMatchesWiki(self, repository: Path) -> None:
-        """Every page of the wiki is in the repository with the same content.
+    @staticmethod
+    def _normalise(text: str) -> list[str]:
+        """Collapse whitespace runs, as the shell tests' diff -b did.
 
-        Whitespace runs are collapsed, as the shell tests\' diff -b did: the
-        bridge adds and removes trailing newlines of its own accord.
+        The bridge adds and removes trailing newlines of its own accord.
         """
+        return [' '.join(line.split()) for line in text.strip().splitlines()]
 
-        def normalise(text: str) -> list[str]:
-            return [' '.join(line.split()) for line in text.strip().splitlines()]
+    def assertPageMatches(self, repository: Path, title: str) -> None:
+        """The repository's file for this page holds the wiki's content."""
+        written = (repository / self.page_file(title)).read_text(encoding='utf-8')
+        self.assertEqual(
+            self._normalise(self.wiki_page(title).text),
+            self._normalise(written),
+            f'contents of {title}',
+        )
 
-        expected = {self.page_file(page.title) for page in self.wiki.pages.values()}
-        self.assertEqual(sorted(expected), self.page_files(repository))
-        for page in self.wiki.pages.values():
-            written = (repository / self.page_file(page.title)).read_text(encoding='utf-8')
-            self.assertEqual(normalise(page.text), normalise(written), f'contents of {page.title}')
+    def assertRepositoryMatchesWiki(
+        self, repository: Path, titles: list[str] | None = None
+    ) -> None:
+        """The repository holds these pages, with the wiki's content.
+
+        Without ``titles`` it must hold every page of the wiki, which is what
+        a clone with no page, category or namespace selection gives.
+        """
+        if titles is None:
+            titles = [page.title for page in self.wiki.pages.values()]
+        self.assertEqual(
+            sorted(self.page_file(title) for title in titles), self.page_files(repository)
+        )
+        for title in titles:
+            self.assertPageMatches(repository, title)
 
     def assertNothingUnhandled(self) -> None:
         """Fail if the helper asked the fake wiki something it does not implement."""
