@@ -35,6 +35,11 @@ MAIN_PAGE = "'''MediaWiki has been installed.'''"
 FILE_EXTENSIONS = ['txt', 'png', 'jpg', 'gif', 'svg']
 
 
+# MediaWiki refuses these in a title, even URL-encoded. It is why the bridge
+# encodes them as _%_<hex> on the way in and decodes them on the way out.
+FORBIDDEN_IN_TITLES = '[]{}|'
+
+
 def normalise_title(title: str) -> str:
     """Normalise a title the way MediaWiki does.
 
@@ -165,6 +170,8 @@ class FakeWiki:
     ) -> int:
         """Create or edit a page, and return the new revision id."""
         title = normalise_title(title)
+        if set(title) & set(FORBIDDEN_IN_TITLES):
+            raise ValueError(f'MediaWiki would refuse the title {title!r}')
         page = self.page(title)
         if page is None:
             page = Page(pageid=self.next_pageid, title=title)
@@ -263,6 +270,8 @@ class FakeWiki:
 
     def _edit(self, params: dict[str, str]) -> dict:
         title, text = params.get('title', ''), params.get('text', '')
+        if set(normalise_title(title)) & set(FORBIDDEN_IN_TITLES):
+            return {'error': {'code': 'invalidtitle', 'info': f'Bad title "{title}"'}}
         revid = self.edit_page(title, text, summary=params.get('summary', ''), user='Pusher')
         return {'edit': {'result': 'Success', 'newrevid': revid, 'title': title}}
 

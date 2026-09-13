@@ -55,4 +55,5 @@ include = [
     "t/test_push_pull.py",
     "t/test_clone.py",
     "t/test_export_import.py",
+    "t/test_utf8.py",
 ]

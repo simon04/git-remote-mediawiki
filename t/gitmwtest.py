@@ -109,9 +109,13 @@ class GitMediaWikiTestCase(unittest.TestCase):
         self.git('commit', '-m', message, cwd=repository)
 
     def page_files(self, repository: Path) -> list[str]:
-        """The tracked files, which is what the wiki's pages became."""
-        listed = self.git('ls-files', cwd=repository).stdout.split()
-        return sorted(listed)
+        """The tracked files, which is what the wiki's pages became.
+
+        -z because git otherwise quotes anything non-ASCII, and half of these
+        page names are.
+        """
+        listed = self.git('ls-files', '-z', cwd=repository).stdout
+        return sorted(name for name in listed.split('\0') if name)
 
     def wiki_page(self, title: str) -> Page:
         """The named page, failing the test if the wiki has no such page."""
