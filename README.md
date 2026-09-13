@@ -44,9 +44,9 @@ bin-wrapper/git mw preview Some_page.mw
 ## Development
 
 ```shell
-# Lint and type-check; both read their settings from pyproject.toml
-uvx ruff check .
-uvx --with mwclient --with requests ty check --extra-search-path .
+# Lint and type-check with the versions pinned in uv.lock
+uv run ruff check .
+uv run ty check --extra-search-path .
 
 # Set up a local MediaWiki to test against (once), see t/README for details
 (cd t && ./install-wiki.sh install)

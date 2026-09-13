@@ -3,3 +3,4 @@ mediawiki/
 trash directory.t*/
 test-results/
 __pycache__/
+.venv/
