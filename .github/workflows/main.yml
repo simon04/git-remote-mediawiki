@@ -23,5 +23,3 @@ jobs:
         run: uv run ty check --extra-search-path . --extra-search-path t
       - name: Test
         run: python3 -m unittest discover --start-directory t --verbose
-      - name: Shell syntax
-        run: sh -n bin-wrapper/git

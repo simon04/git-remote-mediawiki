@@ -26,8 +26,8 @@ dev = [
 [tool.ruff]
 target-version = "py314"
 line-length = 100
-# The two executables have no .py suffix, so name them explicitly.
-extend-include = ["git-remote-mediawiki", "git-mw"]
+# These have no .py suffix, so name them explicitly.
+extend-include = ["git-remote-mediawiki", "git-mw", "bin-wrapper/git"]
 
 [tool.ruff.lint]
 extend-select = ["E", "W", "I", "UP", "B", "C4", "FURB", "RUF"]
@@ -55,4 +55,5 @@ include = [
     "t/test_export_import.py",
     "t/test_utf8.py",
     "t/install_wiki.py",
+    "bin-wrapper/git",
 ]

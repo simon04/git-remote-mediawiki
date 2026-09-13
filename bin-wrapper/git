@@ -1,12 +1,51 @@
-#!/bin/sh
+#!/usr/bin/env python3
+"""Run git with this repository's scripts on PATH.
 
-# git executable wrapper script for git-remote-mediawiki to run tests without
-# installing the scripts in Git's exec path.
+Lets you try git-remote-mediawiki and git mw without installing them into
+Git's exec path:
 
-ROOT_DIR=$(dirname "$0")/..
+        bin-wrapper/git clone mediawiki::https://en.wikipedia.org/w wikipedia
+        bin-wrapper/git mw preview Some_page.mw
+"""
 
-PATH="$ROOT_DIR:$PATH"
+import os
+import shutil
+import sys
+from pathlib import Path
 
-export PATH
+HERE = Path(__file__).resolve().parent
+REPOSITORY = HERE.parent
 
-exec "${GIT_EXEC_PATH:-/usr/bin/}git" "$@"
+
+def real_git() -> str:
+    """The git to hand over to.
+
+    Anything in this directory is skipped, since what is in it is this script,
+    and finding ourselves would mean running in a circle.
+    """
+    exec_path = os.environ.get('GIT_EXEC_PATH')
+    if exec_path:
+        return str(Path(exec_path) / 'git')
+
+    elsewhere = os.pathsep.join(
+        directory
+        for directory in os.environ.get('PATH', '').split(os.pathsep)
+        if directory and Path(directory).resolve() != HERE
+    )
+    found = shutil.which('git', path=elsewhere)
+    if found is None:
+        raise SystemExit('bin-wrapper/git: no git on PATH to hand over to')
+    return found
+
+
+def main(argv: list[str]) -> None:
+    environment = dict(os.environ)
+    path = environment.get('PATH', '')
+    environment['PATH'] = f'{REPOSITORY}{os.pathsep}{path}' if path else str(REPOSITORY)
+    # exec rather than run: this process has nothing left to do, and git should
+    # own the terminal and report its own exit status.
+    os.execve(real_git(), ['git', *argv], environment)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
