@@ -5,11 +5,10 @@ scripts, which declare the ``mwclient`` dependency in their PEP 723
 inline metadata; it is not meant to be run on its own.
 """
 
-import functools
 import io
+import logging
 import re
 import subprocess
-import sys
 from urllib.parse import urlsplit
 
 import mwclient
@@ -46,16 +45,16 @@ __all__ = [
     'git_config_all',
     'git_config_bool',
     'git_credential',
+    'logger',
     'revision_content',
     'run_git',
     'run_git_bytes',
     'smudge_filename',
-    'warn',
 ]
 
-# Progress reports and diagnostics go to stderr, where Git relays them to
-# the user without mixing them into the fast-import stream.
-warn = functools.partial(print, file=sys.stderr)
+# Progress reports and diagnostics go to stderr, where Git relays them to the
+# user without mixing them into the fast-import stream.
+logger = logging.getLogger('git-mediawiki')
 
 
 ############################### Git helpers ###################################
@@ -279,11 +278,13 @@ def connect(remote_name, remote_url):
     try:
         wiki.login(credential['username'], credential['password'], wiki_domain)
     except WIKI_ERRORS as error:
-        warn(f'Failed to log in mediawiki user "{credential["username"]}" on {remote_url}')
-        warn(f'  (error {error})')
+        logger.warning(
+            f'Failed to log in mediawiki user "{credential["username"]}" on {remote_url}'
+        )
+        logger.warning(f'  (error {error})')
         git_credential(credential, 'reject')
         raise SystemExit(1) from error
 
     git_credential(credential, 'approve')
-    warn(f'Logged in mediawiki user "{credential["username"]}".')
+    logger.warning(f'Logged in mediawiki user "{credential["username"]}".')
     return wiki

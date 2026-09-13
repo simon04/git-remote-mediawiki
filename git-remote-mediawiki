@@ -17,6 +17,7 @@
 
 import argparse
 import itertools
+import logging
 import re
 import sys
 from datetime import UTC, datetime, timedelta
@@ -36,11 +37,11 @@ from git_mediawiki import (
     git_config,
     git_config_all,
     git_config_bool,
+    logger,
     revision_content,
     run_git,
     run_git_bytes,
     smudge_filename,
-    warn,
 )
 
 # It's not always possible to delete pages (may require some
@@ -210,15 +211,15 @@ class GitRemoteMediaWiki:
 
     def fatal_mw_error(self, action, error=None):
         """Report that the remote does not look like a wiki, and give up."""
-        warn(f'fatal: could not {action}.')
-        warn(f"fatal: '{self.url}' does not appear to be a mediawiki")
+        logger.warning(f'fatal: could not {action}.')
+        logger.warning(f"fatal: '{self.url}' does not appear to be a mediawiki")
         if self.url.startswith('https'):
-            warn(f"fatal: make sure '{self.url}/api.php' is a valid page")
-            warn('fatal: and the SSL certificate is correct.')
+            logger.warning(f"fatal: make sure '{self.url}/api.php' is a valid page")
+            logger.warning('fatal: and the SSL certificate is correct.')
         else:
-            warn(f"fatal: make sure '{self.url}/api.php' is a valid page.")
+            logger.warning(f"fatal: make sure '{self.url}/api.php' is a valid page.")
         if error is not None:
-            warn(f'fatal: (error {error})')
+            logger.warning(f'fatal: (error {error})')
         raise SystemExit(1)
 
     @cached_property
@@ -268,7 +269,7 @@ class GitRemoteMediaWiki:
 
         parser = self.command_parsers.get(command)
         if parser is None:
-            warn('Unknown command. Aborting...')
+            logger.warning('Unknown command. Aborting...')
             return False
 
         try:
@@ -327,7 +328,7 @@ class GitRemoteMediaWiki:
                 )
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
-            warn(f'{len(mw_pages)} found in namespace {local_namespace} ({namespace_id})')
+            logger.warning(f'{len(mw_pages)} found in namespace {local_namespace} ({namespace_id})')
             pages |= {page['title']: page for page in mw_pages}
         return pages
 
@@ -352,7 +353,7 @@ class GitRemoteMediaWiki:
         pages = {}
         for page_id, page in mw_pages.get('query', {}).get('pages', {}).items():
             if int(page_id) < 0:
-                warn(f'Warning: page {page["title"]} not found on wiki')
+                logger.warning(f'Warning: page {page["title"]} not found on wiki')
             else:
                 pages[page['title']] = page
         return pages
@@ -361,7 +362,7 @@ class GitRemoteMediaWiki:
         """Get the list of pages to be fetched according to configuration."""
         self.connect()
 
-        warn('Listing pages on remote wiki...')
+        logger.warning('Listing pages on remote wiki...')
 
         user_defined = bool(
             self.tracked_pages or self.tracked_categories or self.tracked_namespaces
@@ -380,14 +381,14 @@ class GitRemoteMediaWiki:
             pages |= self.get_mw_all_pages()
 
         if self.import_media:
-            warn('Getting media files for selected pages...')
+            logger.warning('Getting media files for selected pages...')
             pages |= (
                 self.get_linked_mediafiles(pages)
                 if user_defined
                 else self.get_all_mediafiles()
             )
 
-        warn(f'{len(pages)} pages found.')
+        logger.warning(f'{len(pages)} pages found.')
         return pages
 
     def get_all_mediafiles(self):
@@ -402,10 +403,10 @@ class GitRemoteMediaWiki:
                 aplimit='max',
             )
         except WIKI_ERRORS as error:
-            warn('fatal: could not get the list of pages for media files.')
-            warn(f"fatal: '{self.url}' does not appear to be a mediawiki")
-            warn(f"fatal: make sure '{self.url}/api.php' is a valid page.")
-            warn(f'fatal: (error {error})')
+            logger.warning('fatal: could not get the list of pages for media files.')
+            logger.warning(f"fatal: '{self.url}' does not appear to be a mediawiki")
+            logger.warning(f"fatal: make sure '{self.url}/api.php' is a valid page.")
+            logger.warning(f'fatal: (error {error})')
             raise SystemExit(1) from error
         return {page['title']: page for page in mw_pages}
 
@@ -461,10 +462,10 @@ class GitRemoteMediaWiki:
             return {}
 
         fileinfo = imageinfo[-1]
-        warn(f'\tDownloading file {filename}, version {fileinfo["timestamp"]}')
+        logger.warning(f'\tDownloading file {filename}, version {fileinfo["timestamp"]}')
         content = self.download_mw_mediafile(fileinfo['url'])
         if content is None:
-            warn(f'\tFAILED downloading {fileinfo["url"]}! Skipping!')
+            logger.warning(f'\tFAILED downloading {fileinfo["url"]}! Skipping!')
             return {}
         return {
             'content': content,
@@ -484,14 +485,15 @@ class GitRemoteMediaWiki:
                 rf'^.*?{re.escape(self.wiki_name)}/', f'{self.url}/', download_url, count=1
             )
             return self.download_mw_mediafile(download_url)
-        warn('Error downloading mediafile from :')
-        warn(f'URL: {download_url}')
-        warn(f'Server response: {response.status_code} {response.reason}')
+        logger.warning('Error downloading mediafile from :')
+        logger.warning(f'URL: {download_url}')
+        logger.warning(f'Server response: {response.status_code} {response.reason}')
         return None
 
     ################################## revisions ##############################
 
     def get_last_local_revision(self):
+        """Return the id of the last MediaWiki revision imported, or 0."""
         # Get note regarding last mediawiki revision.
         note = run_git(
             [
@@ -505,16 +507,17 @@ class GitRemoteMediaWiki:
         note_info = note.split(' ')
 
         if len(note_info) < 2 or note_info[0] != 'mediawiki_revision:':
-            warn('No previous mediawiki revision found', end='')
             return 0
 
         # Notes are formatted : mediawiki_revision: #number
-        lastrevision_number = int(note_info[1].strip())
-        warn(
-            f'Last local mediawiki revision found is {lastrevision_number}',
-            end='',
-        )
-        return lastrevision_number
+        return int(note_info[1].strip())
+
+    @staticmethod
+    def describe_local_revision(last_local):
+        """Open the progress sentence that the callers below finish off."""
+        if not last_local:
+            return 'No previous mediawiki revision found'
+        return f'Last local mediawiki revision found is {last_local}'
 
     def get_last_global_remote_rev(self):
         """Return the id of the last revision of the wiki, tracked or not.
@@ -533,7 +536,7 @@ class GitRemoteMediaWiki:
         pages = list(self.get_mw_pages().values())
         max_rev_num = 0
 
-        warn('Getting last revision id on tracked pages...')
+        logger.warning('Getting last revision id on tracked pages...')
 
         for page in pages:
             page_id = page['pageid']
@@ -547,7 +550,7 @@ class GitRemoteMediaWiki:
             self.basetimestamps[lastrev['revid']] = lastrev['timestamp']
             max_rev_num = max(max_rev_num, lastrev['revid'])
 
-        warn(f'Last remote revision found is {max_rev_num}.')
+        logger.warning(f'Last remote revision found is {max_rev_num}.')
         return max_rev_num
 
     ############################### content filters ###########################
@@ -595,7 +598,7 @@ class GitRemoteMediaWiki:
         sys.stdout.write('\n')
 
     def mw_option(self, name, value):
-        warn(f"remote-helper command 'option {name}' not yet implemented")
+        logger.warning(f"remote-helper command 'option {name}' not yet implemented")
         sys.stdout.write('unsupported\n')
 
     ################################### import ################################
@@ -639,15 +642,15 @@ class GitRemoteMediaWiki:
                 break
 
         if self.shallow_import and page_revs:
-            warn('  Found 1 revision (shallow import).')
+            logger.warning('  Found 1 revision (shallow import).')
             return [max(page_revs, key=lambda rev: rev['revid'])]
-        warn(f'  Found {len(page_revs)} revision(s).')
+        logger.warning(f'  Found {len(page_revs)} revision(s).')
         return page_revs
 
     def fetch_mw_revisions(self, pages, fetch_from):
         revisions = []
         for n, page in enumerate(pages, start=1):
-            warn(f'page {n}/{len(pages)}: {page["title"]}')
+            logger.warning(f'page {n}/{len(pages)}: {page["title"]}')
             revisions = (
                 self.fetch_mw_revisions_for_page(page, page['pageid'], fetch_from)
                 + revisions
@@ -729,30 +732,28 @@ class GitRemoteMediaWiki:
 
         self.connect()
 
-        warn('Searching revisions...')
+        logger.warning('Searching revisions...')
         last_local = self.get_last_local_revision()
         fetch_from = last_local + 1
-        if fetch_from == 1:
-            warn(', fetching from beginning.')
-        else:
-            warn(', fetching from here.')
+        where = 'beginning' if fetch_from == 1 else 'here'
+        logger.warning(f'{self.describe_local_revision(last_local)}, fetching from {where}.')
 
         if self.fetch_strategy == 'by_rev':
-            warn('Fetching & writing export data by revs...')
+            logger.warning('Fetching & writing export data by revs...')
             n = self.mw_import_ref_by_revs(fetch_from)
         elif self.fetch_strategy == 'by_page':
-            warn('Fetching & writing export data by pages...')
+            logger.warning('Fetching & writing export data by pages...')
             n = self.mw_import_ref_by_pages(fetch_from)
         else:
-            warn(f'fatal: invalid fetch strategy "{self.fetch_strategy}".')
-            warn(
+            logger.warning(f'fatal: invalid fetch strategy "{self.fetch_strategy}".')
+            logger.warning(
                 'Check your configuration variables '
                 f'remote.{self.remotename}.fetchStrategy and mediawiki.fetchStrategy',
             )
             raise SystemExit(1)
 
         if fetch_from == 1 and n == 0:
-            warn('You appear to have cloned an empty MediaWiki.')
+            logger.warning('You appear to have cloned an empty MediaWiki.')
             # Something has to be done remote-helper side. If nothing is done,
             # an error is thrown saying that HEAD is referring to unknown
             # object 0000000000000000000 and the clone fails.
@@ -811,7 +812,7 @@ class GitRemoteMediaWiki:
 
         for rev in result_page.get('revisions', []):
             if page_title not in pages:
-                warn(f'{n}/{total}: Skipping revision #{rev["revid"]} of {page_title}')
+                logger.warning(f'{n}/{total}: Skipping revision #{rev["revid"]} of {page_title}')
                 continue
 
             self.imported += 1
@@ -852,7 +853,7 @@ class GitRemoteMediaWiki:
             # If this is a revision of the media page for a new version of a
             # file, do one common commit for both file and media page.
             # Else do a commit only for that page.
-            warn(f'{n}/{total}: Revision #{rev["revid"]} of {commit["title"]}')
+            logger.warning(f'{n}/{total}: Revision #{rev["revid"]} of {commit["title"]}')
             self.import_file_revision(
                 commit, fetch_from == 1, self.imported, mediafile
             )
@@ -864,9 +865,13 @@ class GitRemoteMediaWiki:
         if git_config_bool('advice.pushNonFastForward', default=True):
             # Native git-push would show this after the summary. We can't ask
             # it to display it cleanly, so print it ourselves before.
-            warn('To prevent you from losing history, non-fast-forward updates were rejected')
-            warn("Merge the remote changes (e.g. 'git pull') before pushing again. See the")
-            warn("'Note about fast-forwards' section of 'git push --help' for details.")
+            logger.warning(
+                'To prevent you from losing history, non-fast-forward updates were rejected'
+            )
+            logger.warning(
+                "Merge the remote changes (e.g. 'git pull') before pushing again. See the"
+            )
+            logger.warning("'Note about fast-forwards' section of 'git push --help' for details.")
         sys.stdout.write(f'error {remote} "non-fast-forward"\n')
         return False
 
@@ -874,8 +879,8 @@ class GitRemoteMediaWiki:
         newrevid = None
         path = f'File:{complete_file_name}'
         if extension not in self.get_allowed_file_extensions():
-            warn(f'{complete_file_name} is not a permitted file on this wiki.')
-            warn('Check the configuration of file uploads in your mediawiki.')
+            logger.warning(f'{complete_file_name} is not a permitted file on this wiki.')
+            logger.warning('Check the configuration of file uploads in your mediawiki.')
             return newrevid
 
         # Deleting and uploading a file requires a privileged user
@@ -883,15 +888,15 @@ class GitRemoteMediaWiki:
             try:
                 self.wiki.delete(title=path, reason=summary)
             except WIKI_ERRORS as error:
-                warn('Failed to delete file on remote wiki')
-                warn('Check your permissions on the remote site. Error code:')
-                warn(str(error))
+                logger.warning('Failed to delete file on remote wiki')
+                logger.warning('Check your permissions on the remote site. Error code:')
+                logger.warning(str(error))
                 raise SystemExit(1) from error
             return newrevid
 
         content = run_git_bytes(['cat-file', 'blob', new_sha1])
         if not content:
-            warn(f'Empty file {complete_file_name} not pushed.')
+            logger.warning(f'Empty file {complete_file_name} not pushed.')
             return newrevid
 
         try:
@@ -903,7 +908,7 @@ class GitRemoteMediaWiki:
             ) from error
         last_file_page = self.wiki.get_page(path)
         newrevid = (last_file_page or {}).get('revid')
-        warn(f'Pushed file: {new_sha1} - {complete_file_name}.')
+        logger.warning(f'Pushed file: {new_sha1} - {complete_file_name}.')
         return newrevid
 
     def mw_push_file(self, diff_info, complete_file_name, summary, oldrevid):
@@ -937,7 +942,7 @@ class GitRemoteMediaWiki:
                 and namespace_id == self.get_mw_namespace_id('File')
                 and not self.export_media
             ):
-                warn(f'Ignoring media file related page: {complete_file_name}')
+                logger.warning(f'Ignoring media file related page: {complete_file_name}')
                 return oldrevid
             if page_deleted:
                 # Deleting a page usually requires special privileges. A common
@@ -959,20 +964,20 @@ class GitRemoteMediaWiki:
                 result = self.wiki.edit(**params)
             except APIError as error:
                 # edit conflicts, considered as non-fast-forward
-                warn(f'Warning: Error {error} from mediawiki.')
+                logger.warning(f'Warning: Error {error} from mediawiki.')
                 raise NonFastForward from error
             except WIKI_ERRORS as error:
                 # Other errors. Shouldn't happen => just give up.
                 raise SystemExit(f'Fatal: Error {error} from mediawiki') from error
 
             newrevid = result.get('edit', {}).get('newrevid')
-            warn(f'Pushed file: {new_sha1} - {title}')
+            logger.warning(f'Pushed file: {new_sha1} - {title}')
         elif self.export_media:
             newrevid = self.mw_upload_file(
                 complete_file_name, new_sha1, extension, page_deleted, summary
             )
         else:
-            warn(f'Ignoring media file {complete_file_name}')
+            logger.warning(f'Ignoring media file {complete_file_name}')
 
         return newrevid or oldrevid
 
@@ -988,13 +993,13 @@ class GitRemoteMediaWiki:
                 )
             force, local, remote = match.groups()
             if force:
-                warn('Warning: forced push not allowed on a MediaWiki.')
+                logger.warning('Warning: forced push not allowed on a MediaWiki.')
             if not local:
-                warn('Cannot delete remote branch on a MediaWiki')
+                logger.warning('Cannot delete remote branch on a MediaWiki')
                 sys.stdout.write(f'error {remote} cannot delete\n')
                 continue
             if remote != 'refs/heads/master':
-                warn("Only push to the branch 'master' is supported on a MediaWiki")
+                logger.warning("Only push to the branch 'master' is supported on a MediaWiki")
                 sys.stdout.write(f'error {remote} only master allowed\n')
                 continue
             if self.mw_push_revision(local, remote):
@@ -1004,17 +1009,21 @@ class GitRemoteMediaWiki:
         sys.stdout.write('\n')
 
         if pushed and self.dumb_push:
-            warn('Just pushed some revisions to MediaWiki.')
-            warn('The pushed revisions now have to be re-imported, and your current branch')
-            warn('needs to be updated with these re-imported commits. You can do this with')
-            warn()
-            warn('  git pull --rebase')
-            warn()
+            logger.warning('Just pushed some revisions to MediaWiki.')
+            logger.warning(
+                'The pushed revisions now have to be re-imported, and your current branch'
+            )
+            logger.warning(
+                'needs to be updated with these re-imported commits. You can do this with'
+            )
+            logger.warning('')
+            logger.warning('  git pull --rebase')
+            logger.warning('')
 
     def mw_push_revision(self, local, remote):
         # ``remote`` actually has to be "refs/heads/master" at this point.
         last_local_revid = self.get_last_local_revision()
-        warn('.')  # Finish the sentence started above
+        logger.warning(f'{self.describe_local_revision(last_local_revid)}.')
         last_remote_revid = self.get_last_remote_revision()
         mw_revision = last_remote_revid
 
@@ -1038,7 +1047,7 @@ class GitRemoteMediaWiki:
         if last_local_revid > 0:
             parsed_sha1 = remoteorigin_sha1
             # Find a path from last MediaWiki commit to pushed commit
-            warn('Computing path from local to remote ...')
+            logger.warning('Computing path from local to remote ...')
             local_ancestry = {}
             for line in run_git(
                 ['rev-list', '--boundary', '--parents', local, f'^{parsed_sha1}']
@@ -1053,14 +1062,16 @@ class GitRemoteMediaWiki:
             while parsed_sha1 != head_sha1:
                 child = local_ancestry.get(parsed_sha1)
                 if not child:
-                    warn('Cannot find a path in history from remote commit to last commit')
+                    logger.warning(
+                        'Cannot find a path in history from remote commit to last commit'
+                    )
                     return self.error_non_fast_forward(remote)
                 commit_pairs.append([parsed_sha1, child])
                 parsed_sha1 = child
         else:
             # No remote mediawiki revision. Export the whole history
             # (linearized with --first-parent)
-            warn('Warning: no common ancestor, pushing complete history')
+            logger.warning('Warning: no common ancestor, pushing complete history')
             history = run_git(['rev-list', '--first-parent', '--children', local]).splitlines()
             for line in reversed(history[1:]):
                 commit_pairs.append(line.split())
@@ -1120,7 +1131,7 @@ class GitRemoteMediaWiki:
         Ex.: "File", "Project". Returns None when there is no such namespace.
         """
         if name not in self.namespace_id:
-            warn(f'Namespace {name} not found in cache, querying the wiki ...')
+            logger.warning(f'Namespace {name} not found in cache, querying the wiki ...')
             # NS not found => get namespace ids from MW and store the requested
             # one in the configuration file.
             result = self.wiki.query(meta='siteinfo', siprop='namespaces')
@@ -1136,7 +1147,7 @@ class GitRemoteMediaWiki:
             known = ' '.join(
                 namespace.replace(' ', '_') for namespace in sorted(self.namespace_id)
             )
-            warn(f'No such namespace {name} on MediaWiki, known namespaces: {known}')
+            logger.warning(f'No such namespace {name} on MediaWiki, known namespaces: {known}')
             self.namespace_id[name] = None
 
         namespace_id = self.namespace_id[name]
@@ -1193,6 +1204,9 @@ def main(argv):
     sys.stdout.reconfigure(
         encoding='utf-8', errors='strict', newline='\n', write_through=True
     )
+
+    # Bare messages: Git shows our stderr to the user as-is.
+    logging.basicConfig(format='%(message)s', level=logging.INFO)
 
     helper = GitRemoteMediaWiki(argv[0], argv[1])
 

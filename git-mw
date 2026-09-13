@@ -33,12 +33,9 @@ from git_mediawiki import (
     clean_filename,
     connect,
     git_config,
+    logger,
     run_git,
 )
-
-# Progress traces are logged at DEBUG, so -v is what turns them on.
-logger = logging.getLogger('git-mw')
-
 
 ############################# HTML manipulation ################################
 
