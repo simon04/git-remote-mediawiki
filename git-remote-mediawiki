@@ -186,6 +186,10 @@ class GitRemoteMediaWiki:
         # Remember the timestamp corresponding to a revision id.
         self.basetimestamps = {}
 
+        # Number of revisions written out so far by the current import; also
+        # the fast-import mark of the last one.
+        self.imported = 0
+
         # In memory cache for MediaWiki namespace ids, seeded from the
         # configuration file, where they are stored as
         # "Name_of_namespace:Id_namespace", ex.: "File:6".
@@ -772,8 +776,8 @@ class GitRemoteMediaWiki:
         ``revision_ids`` is a list of revision numbers, ``pages`` a mapping
         keyed by page title: only revisions of those pages are imported.
         """
+        self.imported = 0
         n = 0
-        n_actual = 0
         total = len(revision_ids)
 
         for page_rev_ids in itertools.batched(revision_ids, MAX_REVS, strict=False):
@@ -795,13 +799,12 @@ class GitRemoteMediaWiki:
                 ) from error
 
             for result_page in result.get('query', {}).get('pages', {}).values():
-                n_actual = self.handle_result_page(
-                    n, total, fetch_from, result_page, pages, n_actual
-                )
+                self.handle_result_page(n, total, fetch_from, result_page, pages)
 
-        return n_actual
+        return self.imported
 
-    def handle_result_page(self, n, total, fetch_from, result_page, pages, n_actual):
+    def handle_result_page(self, n, total, fetch_from, result_page, pages):
+        """Write out every wanted revision of one page, in order."""
         page_title = result_page['title']
         # Placeholder in case a revision has no timestamp.
         last_timestamp = datetime.fromtimestamp(0, UTC)
@@ -811,7 +814,7 @@ class GitRemoteMediaWiki:
                 warn(f'{n}/{total}: Skipping revision #{rev["revid"]} of {page_title}')
                 continue
 
-            n_actual += 1
+            self.imported += 1
 
             content = revision_content(rev)
             if content is None:
@@ -850,9 +853,9 @@ class GitRemoteMediaWiki:
             # file, do one common commit for both file and media page.
             # Else do a commit only for that page.
             warn(f'{n}/{total}: Revision #{rev["revid"]} of {commit["title"]}')
-            self.import_file_revision(commit, fetch_from == 1, n_actual, mediafile)
-
-        return n_actual
+            self.import_file_revision(
+                commit, fetch_from == 1, self.imported, mediafile
+            )
 
     #################################### push #################################
 
