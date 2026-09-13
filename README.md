@@ -5,6 +5,10 @@ between git and mediawiki, allowing git users to push and pull
 objects from mediawiki just as one would do with a classic git
 repository thanks to remote-helpers.
 
+This is a fork of [Git-Mediawiki](https://github.com/Git-Mediawiki/Git-Mediawiki), maintained by
+[simon04](https://github.com/simon04). The scripts have been rewritten from
+Perl to Python; see [What changed in this fork](#what-changed-in-this-fork).
+
 **For more information, read the [User manual](docs/User-manual.md).**
 
 ## Installation
@@ -58,9 +62,24 @@ make -C t test
 (cd t && ./t9360-mw-to-git-clone.sh --verbose)
 ```
 
-## Who are we ?
+## What changed in this fork
 
-This is a fork of [Git-Mediawiki](https://github.com/Git-Mediawiki/Git-Mediawiki), which had been looking for a new maintainer since [issue #33](https://github.com/Git-Mediawiki/Git-Mediawiki/issues/33). It is maintained by [Simon Legner](https://github.com/simon04), and the scripts have been rewritten in Python.
+Upstream had been looking for a new maintainer since [issue #33](https://github.com/Git-Mediawiki/Git-Mediawiki/issues/33).
+This fork picks it up and, so far:
+
+* rewrites `git-remote-mediawiki`, `git mw` and the test helper from Perl to
+  Python 3.14, replacing `MediaWiki::API` with
+  [mwclient](https://github.com/mwclient/mwclient). The scripts declare their
+  own dependencies inline, so there is nothing to install but
+  [uv](https://docs.astral.sh/uv/).
+* adds `git mw setup`, a questionnaire that checks each answer against the wiki
+  and then runs the `git clone` it describes.
+* documents [using it with Wikipedia](docs/Wikipedia.md), which needs a bot
+  password rather than an account password.
+* fixes a handful of long-standing bugs on the way, among them page slices one
+  title over the API limit, and quotes leaking into every pushed edit summary.
+
+## Who are we ?
 
 Git-Mediawiki was essentially developed by [Ensimag](http://ensimag.grenoble-inp.fr/) students (see the logs for the detailed list of authors), supervised  by [Matthieu Moy](https://matthieu-moy.fr/), with the help of the [git community](http://git.kernel.org/).
 

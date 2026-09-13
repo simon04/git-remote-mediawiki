@@ -129,7 +129,7 @@ becomes `%2F`.
 | --- | --- |
 | `Git` | `Git.mw` |
 | `Linux kernel` | `Linux_kernel.mw` |
-| `User:Simon Legner/sandbox` | `User:Simon_Legner%2Fsandbox.mw` |
+| `User:simon04/sandbox` | `User:simon04%2Fsandbox.mw` |
 
 Edit the file in place. Renaming it is not a page move: it is pushed as a
 delete of the old title and a creation of the new one.
