@@ -1,8 +1,7 @@
-# This is not a distributable Python package: git-remote-mediawiki,
-# git-mw and t/test-gitmw.py are PEP 723 scripts that declare their own
-# dependencies and are installed by copying them into Git's exec path. This
-# file exists to pin the development tooling and configure it, hence
-# package = false and an empty dependency list.
+# This is not a distributable Python package: git-remote-mediawiki and git-mw
+# are PEP 723 scripts that declare their own dependencies and are installed by
+# copying them into Git's exec path. This file exists to pin the development
+# tooling and configure it, hence package = false and an empty dependency list.
 
 [project]
 name = "git-remote-mediawiki"
@@ -48,7 +47,6 @@ include = [
     "git_mediawiki.py",
     "git-remote-mediawiki",
     "git-mw",
-    "t/test-gitmw.py",
     "t/fakewiki.py",
     "t/gitmwtest.py",
     "t/test_continuing_queries.py",

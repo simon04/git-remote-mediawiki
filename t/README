@@ -1,124 +1,57 @@
-Tests for Mediawiki-to-Git
-==========================
+Testing git-remote-mediawiki
+============================
 
-Introduction
-------------
-This manual describes how to install the git-remote-mediawiki test
-environment on a machine with git installed on it.
+The tests are Python, and run against a MediaWiki that lives inside the test
+process. They need no web server, no PHP and no MediaWiki install:
 
-Prerequisite
-------------
+	make test
 
-In order to run this test environment correctly, you will need to
-install the following packages (Debian/Ubuntu names, may need to be
-adapted for another distribution):
+or, from the top of the repository,
 
-* lighttpd
-* php
-* php-cgi
-* php-cli
-* php-curl
-* php-sqlite
+	python3 -m unittest discover --start-directory t --verbose
 
-Principles and Technical Choices
---------------------------------
+How they work
+-------------
 
-The test environment makes it easy to install and manipulate one or
-several MediaWiki instances. To allow developers to run the testsuite
-easily, the environment does not require root privilege (except to
-install the required packages if needed). It starts a webserver
-instance on the user's account (using lighttpd greatly helps for
-that), and does not need a separate database daemon (thanks to the use
-of sqlite).
+`fakewiki.py` answers the API calls the bridge makes. Tests change its
+contents directly, through `edit_page`, `delete_page` and `upload_file`;
+only the code under test goes over HTTP.
 
-Run the test environment
+It implements what the bridge asks for and refuses anything else, rather than
+returning a plausible empty result. `assertNothingUnhandled` fails a test that
+provoked such a refusal. A fake that guesses is worse than no fake, because
+the confidence it gives is not earned.
+
+`gitmwtest.py` gives each test an empty wiki and a scratch directory, and
+runs the real `git` binary against the real scripts. Nothing imports the code
+under test, so the remote-helper protocol, the lookup of `git-remote-mediawiki`
+on PATH, and fast-import are all exercised as they are in use.
+
+Writing a test
+--------------
+
+	class MyTest(GitMediaWikiTestCase):
+	    def test_something(self) -> None:
+	        self.wiki.edit_page('Foo', 'contents')
+	        repository = self.clone()
+	        self.assertRepositoryMatchesWiki(repository)
+
+`self.clone(**config)` clones the wiki, passing keywords as
+`remote.origin.<name>`. `self.git(...)` runs git in the repository and fails
+the test if it exits non-zero. `self.commit(repository, message, **files)`
+writes files and commits them.
+
+Against a real MediaWiki
 ------------------------
 
-Install a new wiki
-~~~~~~~~~~~~~~~~~~
+Nothing does this yet, and it is the gap worth closing: every difference
+between `fakewiki.py` and a real wiki is a way for these tests to pass while
+the bridge is broken. Five such differences turned up while the shell tests
+were being ported, among them that MediaWiki trims trailing whitespace when
+it saves, which is what makes a page deleted through git stay deleted.
 
-Once you have all the prerequisite, you need to install a MediaWiki
-instance on your machine. If you already have one, it is still
-strongly recommended to install one with the script provided. Here's
-how to work it:
+`install-wiki.sh` stands up a real MediaWiki with lighttpd and PHP, and is
+kept for that purpose:
 
-a. change directory to contrib/mw-to-git/t/
-b. if needed, edit test.config to choose your installation parameters
-c. run `./install-wiki.sh install`
-d. check on your favourite web browser if your wiki is correctly
-   installed.
-
-Remove an existing wiki
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Edit the file test.config to fit the wiki you want to delete, and then
-execute the command `./install-wiki.sh delete` from the
-contrib/mw-to-git/t directory.
-
-Run the existing tests
-~~~~~~~~~~~~~~~~~~~~~~
-
-The provided tests are currently in the `contrib/mw-to-git/t` directory.
-The files are all the t936[0-9]-*.sh shell scripts.
-
-a. Run all tests:
-To do so, run "make test" from this directory.
-
-b. Run a specific test:
-To run a given test <test_name>, run ./<test_name> from the
-contrib/mw-to-git/t directory.
-
-How to create new tests
------------------------
-
-Available functions
-~~~~~~~~~~~~~~~~~~~
-
-The test environment of git-remote-mediawiki provides some functions
-useful to test its behaviour. for more details about the functions'
-parameters, please refer to the `test-gitmw-lib.sh` and
-`test-gitmw.py` files.
-
-** `test_check_wiki_precond`:
-Check if the tests must be skipped or not. Please use this function
-at the beginning of each new test file.
-
-** `wiki_getpage`:
-Fetch a given page from the wiki and puts its content in the
-directory in parameter.
-
-** `wiki_delete_page`:
-Delete a given page from the wiki.
-
-** `wiki_edit_page`:
-Create or modify a given page in the wiki. You can specify several
-parameters like a summary for the page edition, or add the page to a
-given category.
-See test-gitmw.py for more details.
-
-** `wiki_getallpage`:
-Fetch all pages from the wiki into a given directory. The directory
-is created if it does not exists.
-
-** `test_diff_directories`:
-Compare the content of two directories. The content must be the same.
-Use this function to compare the content of a git directory and a wiki
-one created by wiki_getallpage.
-
-** `test_contains_N_files`:
-Check if the given directory contains a given number of file.
-
-** `wiki_page_exists`:
-Tests if a given page exists on the wiki.
-
-** `wiki_reset`:
-Reset the wiki, i.e. flush the database. Use this function at the
-beginning of each new test, except if the test re-uses the same wiki
-(and history) as the previous test.
-
-How to write a new test
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Please, follow the standards given by git. See git/t/README.
-New file should be named as t936[0-9]-*.sh.
-Be sure to reset your wiki regularly with the function `wiki_reset`.
+	./install-wiki.sh install     # configuration is in ./test.config
+	./install-wiki.sh delete

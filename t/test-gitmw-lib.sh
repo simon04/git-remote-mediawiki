@@ -26,22 +26,6 @@ else
 	WIKI_DIR_INST="$CURR_DIR/$WEB_WWW"
 fi
 
-wiki_upload_file () {
-	"$CURR_DIR"/test-gitmw.py upload_file "$@"
-}
-
-wiki_getpage () {
-	"$CURR_DIR"/test-gitmw.py get_page "$@"
-}
-
-wiki_delete_page () {
-	"$CURR_DIR"/test-gitmw.py delete_page "$@"
-}
-
-wiki_editpage () {
-	"$CURR_DIR"/test-gitmw.py edit_page "$@"
-}
-
 die () {
 	die_with_status 1 "$@"
 }
@@ -51,66 +35,6 @@ die_with_status () {
 	shift
 	echo >&2 "$*"
 	exit "$status"
-}
-
-
-# Check the preconditions to run git-remote-mediawiki's tests
-test_check_precond () {
-	# If CI is true, assume we're running under github CI
-	if [ "$CI" != "true" ]; then
-		GIT_EXEC_PATH=$(cd "$(dirname "$0")" && cd "../.." && pwd)
-		PATH="$GIT_EXEC_PATH"'/bin-wrapper:'"$PATH"
-
-		if [ ! -d "$WIKI_DIR_INST/$WIKI_DIR_NAME" ];
-		then
-			skip_all='skipping gateway git-mw tests, no mediawiki found'
-			test_done
-		fi
-	fi
-}
-
-# missing from sharness
-# debugging-friendly alternatives to "test [-f|-d|-e]"
-# The commands test the existence or non-existence of $1. $2 can be
-# given to provide a more precise diagnosis.
-test_path_is_file () {
-	if ! test -f "$1"
-	then
-		echo "File $1 doesn't exist. $2"
-		false
-	fi
-}
-
-test_path_is_dir () {
-	if ! test -d "$1"
-	then
-		echo "Directory $1 doesn't exist. $2"
-		false
-	fi
-}
-
-# Check if the directory exists and is empty as expected, barf otherwise.
-test_dir_is_empty () {
-	test_path_is_dir "$1" &&
-	if test -n "$(ls -a1 "$1" | egrep -v '^\.\.?$')"
-	then
-		echo "Directory '$1' is not empty, it contains:"
-		ls -la "$1"
-		return 1
-	fi
-}
-
-test_path_is_missing () {
-	if test -e "$1"
-	then
-		echo "Path exists:"
-		ls -ld "$1"
-		if test $# -ge 1
-		then
-			echo "$*"
-		fi
-		false
-	fi
 }
 
 # Use this instead of "grep expected-string actual" to see if the
@@ -129,101 +53,6 @@ test_i18ngrep () {
 	else
 		grep "$@"
 	fi
-}
-
-# test_diff_directories <dir_git> <dir_wiki>
-#
-# Compare the contents of directories <dir_git> and <dir_wiki> with diff
-# and errors if they do not match. The program will
-# not look into .git in the process.
-# Warning: the first argument MUST be the directory containing the git data
-test_diff_directories () {
-	rm -rf "$1_tmp"
-	mkdir -p "$1_tmp"
-	cp "$1"/*.mw "$1_tmp"
-	diff -r -b "$1_tmp" "$2"
-}
-
-# $1=<dir>
-# $2=<N>
-#
-# Check that <dir> contains exactly <N> files
-test_contains_N_files () {
-	if test $(ls -- "$1" | wc -l) -ne "$2"; then
-		echo "directory $1 should contain $2 files"
-		echo "it contains these files:"
-		ls "$1"
-		false
-	fi
-}
-
-
-# wiki_check_content <file_name> <page_name>
-#
-# Compares the contents of the file <file_name> and the wiki page
-# <page_name> and exits with error 1 if they do not match.
-wiki_check_content () {
-	mkdir -p wiki_tmp
-	wiki_getpage "$2" wiki_tmp
-	# replacement of forbidden character in file name
-	page_name=$(printf "%s\n" "$2" | sed -e "s/\//%2F/g")
-
-	diff -b "$1" wiki_tmp/"$page_name".mw
-	if test $? -ne 0
-	then
-		rm -rf wiki_tmp
-		error "ERROR: file $2 not found on wiki"
-	fi
-	rm -rf wiki_tmp
-}
-
-# wiki_page_exist <page_name>
-#
-# Check the existence of the page <page_name> on the wiki and exits
-# with error if it is absent from it.
-wiki_page_exist () {
-	mkdir -p wiki_tmp
-	wiki_getpage "$1" wiki_tmp
-	page_name=$(printf "%s\n" "$1" | sed "s/\//%2F/g")
-	if test -f wiki_tmp/"$page_name".mw ; then
-		rm -rf wiki_tmp
-	else
-		rm -rf wiki_tmp
-		error "test failed: file $1 not found on wiki"
-	fi
-}
-
-# wiki_getallpagename
-#
-# Fetch the name of each page on the wiki.
-wiki_getallpagename () {
-	"$CURR_DIR"/test-gitmw.py getallpagename
-}
-
-# wiki_getallpagecategory <category>
-#
-# Fetch the name of each page belonging to <category> on the wiki.
-wiki_getallpagecategory () {
-	"$CURR_DIR"/test-gitmw.py getallpagename "$@"
-}
-
-# wiki_getallpage <dest_dir> [<category>]
-#
-# Fetch all the pages from the wiki and place them in the directory
-# <dest_dir>.
-# If <category> is define, then wiki_getallpage fetch the pages included
-# in <category>.
-wiki_getallpage () {
-	if test -z "$2";
-	then
-		wiki_getallpagename
-	else
-		wiki_getallpagecategory "$2"
-	fi
-	mkdir -p "$1"
-	while read -r line; do
-		wiki_getpage "$line" $1;
-	done < all.txt
 }
 
 # ================= Install part =================
@@ -393,8 +222,7 @@ install_mediawiki () {
 	cat <<-'EOF' >>$localsettings
 # Custom settings added by test-gitmw-lib.sh
 #
-# Uploading text files is needed for
-# t9363-mw-to-git-export-import.sh
+# Uploading text files is needed by the media tests
 $wgEnableUploads = true;
 $wgFileExtensions[] = 'txt';
 EOF
