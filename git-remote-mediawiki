@@ -152,10 +152,70 @@ class NonFastForward(Exception):
 
 
 class CommandParser(argparse.ArgumentParser):
-    """An ArgumentParser that reports errors instead of exiting the helper."""
+    """Argument handling for the remote helper.
+
+    An instance parses one line of the remote-helper protocol; the class holds
+    the table of them, and the usage message for the helper's own command line.
+
+    argparse's habit of writing to stdout and exiting is wrong here twice over:
+    stdout carries the fast-import stream, and a command Git sent us should
+    fail the way the rest of the script does rather than print usage.
+    """
 
     def error(self, message: str) -> NoReturn:
         raise CommandError(message)
+
+    @classmethod
+    def for_helper(cls, helper: GitRemoteMediaWiki) -> dict[str, CommandParser]:
+        """Build one parser per remote-helper command.
+
+        Each parser carries the method that implements its command; the parsed
+        arguments are handed to it as keywords.
+        """
+        parsers: dict[str, CommandParser] = {}
+
+        def add(name: str, handler: Callable[..., None]) -> CommandParser:
+            parser = cls(prog=name, add_help=False)
+            parser.set_defaults(handler=handler)
+            parsers[name] = parser
+            return parser
+
+        add('capabilities', helper.mw_capabilities)
+        add('list', helper.mw_list).add_argument('for_push', nargs='?')
+        add('import', helper.mw_import).add_argument('ref')
+        option = add('option', helper.mw_option)
+        option.add_argument('name')
+        option.add_argument('value')
+        add('push', helper.mw_push).add_argument('refspec', nargs='?', default='')
+
+        return parsers
+
+    @staticmethod
+    def exit_error_usage() -> NoReturn:
+        """Explain how the helper is meant to be driven, and give up."""
+        raise SystemExit(
+            'ERROR: git-remote-mediawiki was not called with a correct number of\n'
+            'parameters.\n'
+            '\n'
+            'You may obtain this error because you attempted to run the\n'
+            'git-remote-mediawiki module directly. It is a Git remote helper, which\n'
+            'Git runs for you when a remote URL begins with "mediawiki::" followed by\n'
+            'the address of the wiki, the one holding api.php:\n'
+            '\n'
+            '\tgit clone mediawiki::https://en.wikipedia.org/w wikipedia\n'
+            '\n'
+            'That clones every page of the wiki, which for Wikipedia is millions of\n'
+            'them. To track only some, list them in remote.<name>.pages. Values are\n'
+            'separated by whitespace, so write the spaces in a title as underscores:\n'
+            '\n'
+            '\tgit clone -c remote.origin.pages="Git Linux_kernel" '
+            'mediawiki::https://en.wikipedia.org/w wikipedia\n'
+            '\n'
+            'remote.<name>.categories and remote.<name>.namespaces select pages the\n'
+            'same way, by category membership and by namespace.\n'
+            '\n'
+            'Then, use git commit, push and pull as with every normal git repository.'
+        )
 
 
 class GitRemoteMediaWiki:
@@ -245,7 +305,7 @@ class GitRemoteMediaWiki:
         # Namespaces already on disk, which must not be written out again.
         self.cached_mw_namespace_id = set(self.namespace_id)
 
-        self.command_parsers = self.build_command_parsers()
+        self.command_parsers = CommandParser.for_helper(self)
 
     ################################ error handling ###########################
 
@@ -275,30 +335,6 @@ class GitRemoteMediaWiki:
         return self.wiki
 
     ################################ command parser ###########################
-
-    def build_command_parsers(self) -> dict[str, CommandParser]:
-        """Build one argument parser per remote-helper command.
-
-        Each parser knows which method implements the command; the parsed
-        arguments are handed to it as keywords.
-        """
-        parsers = {}
-
-        def add(name: str, handler: Callable[..., None]) -> CommandParser:
-            parser = CommandParser(prog=name, add_help=False)
-            parser.set_defaults(handler=handler)
-            parsers[name] = parser
-            return parser
-
-        add('capabilities', self.mw_capabilities)
-        add('list', self.mw_list).add_argument('for_push', nargs='?')
-        add('import', self.mw_import).add_argument('ref')
-        option = add('option', self.mw_option)
-        option.add_argument('name')
-        option.add_argument('value')
-        add('push', self.mw_push).add_argument('refspec', nargs='?', default='')
-
-        return parsers
 
     def parse_command(self, line: str) -> bool:
         """Run one remote-helper command; return False to stop the helper."""
@@ -1208,35 +1244,9 @@ class GitRemoteMediaWiki:
         return self.get_mw_namespace_id(namespace)
 
 
-def exit_error_usage() -> NoReturn:
-    raise SystemExit(
-        'ERROR: git-remote-mediawiki was not called with a correct number of\n'
-        'parameters.\n'
-        '\n'
-        'You may obtain this error because you attempted to run the\n'
-        'git-remote-mediawiki module directly. It is a Git remote helper, which\n'
-        'Git runs for you when a remote URL begins with "mediawiki::" followed by\n'
-        'the address of the wiki, the one holding api.php:\n'
-        '\n'
-        '\tgit clone mediawiki::https://en.wikipedia.org/w wikipedia\n'
-        '\n'
-        'That clones every page of the wiki, which for Wikipedia is millions of\n'
-        'them. To track only some, list them in remote.<name>.pages. Values are\n'
-        'separated by whitespace, so write the spaces in a title as underscores:\n'
-        '\n'
-        '\tgit clone -c remote.origin.pages="Git Linux_kernel" '
-        'mediawiki::https://en.wikipedia.org/w wikipedia\n'
-        '\n'
-        'remote.<name>.categories and remote.<name>.namespaces select pages the\n'
-        'same way, by category membership and by namespace.\n'
-        '\n'
-        'Then, use git commit, push and pull as with every normal git repository.'
-    )
-
-
 def main(argv: Sequence[str]) -> None:
     if len(argv) != 2:
-        exit_error_usage()
+        CommandParser.exit_error_usage()
 
     # By default, use UTF-8 to communicate with Git and the user. Pass the
     # error handlers explicitly, because reconfigure() resets them to 'strict':
