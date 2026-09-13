@@ -84,9 +84,7 @@ def connect() -> mwclient.Site:
     return site
 
 
-def query_list(
-    site: mwclient.Site, list_name: str, **params: Any
-) -> list[dict[str, Any]]:
+def query_list(site: mwclient.Site, list_name: str, **params: Any) -> list[dict[str, Any]]:
     """Run a list query, following every continuation."""
     params = {'list': list_name, **params}
     items = []
@@ -154,9 +152,7 @@ def wiki_getallpagename(site: mwclient.Site, args: argparse.Namespace) -> None:
     else:
         pages = query_list(site, 'allpages', aplimit=500)
 
-    Path('all.txt').write_text(
-        ''.join(f'{page["title"]}\n' for page in pages), encoding='utf-8'
-    )
+    Path('all.txt').write_text(''.join(f'{page["title"]}\n' for page in pages), encoding='utf-8')
 
 
 def wiki_upload_file(site: mwclient.Site, args: argparse.Namespace) -> None:

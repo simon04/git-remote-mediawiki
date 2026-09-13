@@ -113,10 +113,7 @@ class Commit:
 
 def pages_by_title(api_pages: Iterable[ApiResult]) -> dict[str, Page]:
     """Index API page records by title."""
-    return {
-        page['title']: Page(pageid=page['pageid'], title=page['title'])
-        for page in api_pages
-    }
+    return {page['title']: Page(pageid=page['pageid'], title=page['title']) for page in api_pages}
 
 
 def is_null_sha1(sha1: str) -> bool:
@@ -180,9 +177,7 @@ class GitRemoteMediaWiki:
         # Import media files on pull
         self.import_media = git_config_bool(f'remote.{remotename}.mediaimport')
         # Export media files on push, unless explicitly turned off
-        self.export_media = git_config_bool(
-            f'remote.{remotename}.mediaexport', default=True
-        )
+        self.export_media = git_config_bool(f'remote.{remotename}.mediaexport', default=True)
 
         # Import only last revisions (both for clone and fetch)
         self.shallow_import = git_config_bool(f'remote.{remotename}.shallow')
@@ -193,9 +188,9 @@ class GitRemoteMediaWiki:
         # pages. Possible values:
         # - by_rev: perform one query per new revision on the remote wiki
         # - by_page: query each tracked page for new revision
-        self.fetch_strategy = git_config(
-            f'remote.{remotename}.fetchStrategy'
-        ) or git_config('mediawiki.fetchStrategy')
+        self.fetch_strategy = git_config(f'remote.{remotename}.fetchStrategy') or git_config(
+            'mediawiki.fetchStrategy'
+        )
 
         # Force by_page if we are given a set of pages.
         #
@@ -221,9 +216,9 @@ class GitRemoteMediaWiki:
         # push from Git to MediaWiki loses some information, everybody will get
         # the history with information lost). If the import is deterministic,
         # this means everybody gets the same sha1 for each MediaWiki revision.
-        self.dumb_push = git_config_bool(
-            f'remote.{remotename}.dumbPush'
-        ) or git_config_bool('mediawiki.dumbPush')
+        self.dumb_push = git_config_bool(f'remote.{remotename}.dumbPush') or git_config_bool(
+            'mediawiki.dumbPush'
+        )
 
         wiki_name = re.sub(r'[^/]*://', '', url, count=1)
         # If URL is like http://user:password@example.com/, we clearly don't
@@ -246,9 +241,7 @@ class GitRemoteMediaWiki:
             ['config', '--get-all', f'remote.{remotename}.namespaceCache'], quiet=True
         ).splitlines():
             name, _, namespace_id = entry.partition(':')
-            self.namespace_id[name] = (
-                None if namespace_id == 'notANameSpace' else int(namespace_id)
-            )
+            self.namespace_id[name] = None if namespace_id == 'notANameSpace' else int(namespace_id)
         # Namespaces already on disk, which must not be written out again.
         self.cached_mw_namespace_id = set(self.namespace_id)
 
@@ -350,9 +343,7 @@ class GitRemoteMediaWiki:
                 # the user to specify it.
                 category = f'Category:{category}'
             try:
-                mw_pages = self.wiki.query_list(
-                    'categorymembers', cmtitle=category, cmlimit='max'
-                )
+                mw_pages = self.wiki.query_list('categorymembers', cmtitle=category, cmlimit='max')
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
             pages |= pages_by_title(mw_pages)
@@ -371,9 +362,7 @@ class GitRemoteMediaWiki:
             if namespace_id is None or namespace_id < 0:
                 continue
             try:
-                mw_pages = self.wiki.query_list(
-                    'allpages', apnamespace=namespace_id, aplimit='max'
-                )
+                mw_pages = self.wiki.query_list('allpages', apnamespace=namespace_id, aplimit='max')
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
             logger.warning(f'{len(mw_pages)} found in namespace {local_namespace} ({namespace_id})')
@@ -431,9 +420,7 @@ class GitRemoteMediaWiki:
         if self.import_media:
             logger.warning('Getting media files for selected pages...')
             pages |= (
-                self.get_linked_mediafiles(pages)
-                if user_defined
-                else self.get_all_mediafiles()
+                self.get_linked_mediafiles(pages) if user_defined else self.get_all_mediafiles()
             )
 
         logger.warning(f'{len(pages)} pages found.')
@@ -517,9 +504,7 @@ class GitRemoteMediaWiki:
         if content is None:
             logger.warning(f'\tFAILED downloading {fileinfo["url"]}! Skipping!')
             return None
-        return MediaFile(
-            title=filename, content=content, timestamp=fileinfo['timestamp']
-        )
+        return MediaFile(title=filename, content=content, timestamp=fileinfo['timestamp'])
 
     def download_mw_mediafile(self, download_url: str) -> bytes | None:
         response = self.wiki.session.get(download_url)
@@ -573,9 +558,7 @@ class GitRemoteMediaWiki:
         This makes a single request to the wiki, thus avoiding a loop over all
         tracked pages. This is useful for the fetch-by-rev option.
         """
-        result = self.wiki.query(
-            list='recentchanges', prop='revisions', rclimit='1', rcdir='older'
-        )
+        result = self.wiki.query(list='recentchanges', prop='revisions', rclimit='1', rcdir='older')
         return result['query']['recentchanges'][0]['revid']
 
     def get_last_remote_revision(self) -> int:
@@ -588,9 +571,7 @@ class GitRemoteMediaWiki:
 
         for page in pages:
             page_id = page.pageid
-            result = self.wiki.query(
-                prop='revisions', rvprop='ids|timestamp', pageids=page_id
-            )
+            result = self.wiki.query(prop='revisions', rvprop='ids|timestamp', pageids=page_id)
             revisions = result['query']['pages'][str(page_id)].get('revisions')
             if not revisions:
                 continue
@@ -673,15 +654,10 @@ class GitRemoteMediaWiki:
             result = self.wiki.query(**query)
 
             revisions = (
-                result.get('query', {})
-                .get('pages', {})
-                .get(str(page_id), {})
-                .get('revisions', [])
+                result.get('query', {}).get('pages', {}).get(str(page_id), {}).get('revisions', [])
             )
             for revision in revisions:
-                page_revs.append(
-                    {'pageid': page.pageid, 'revid': revision['revid']}
-                )
+                page_revs.append({'pageid': page.pageid, 'revid': revision['revid']})
 
             if 'query-continue' in result:  # For legacy APIs
                 query['rvstartid'] = result['query-continue']['revisions']['rvstartid']
@@ -697,16 +673,11 @@ class GitRemoteMediaWiki:
         logger.warning(f'  Found {len(page_revs)} revision(s).')
         return page_revs
 
-    def fetch_mw_revisions(
-        self, pages: Sequence[Page], fetch_from: int
-    ) -> list[dict[str, int]]:
+    def fetch_mw_revisions(self, pages: Sequence[Page], fetch_from: int) -> list[dict[str, int]]:
         revisions: list[dict[str, int]] = []
         for n, page in enumerate(pages, start=1):
             logger.warning(f'page {n}/{len(pages)}: {page.title}')
-            revisions = (
-                self.fetch_mw_revisions_for_page(page, page.pageid, fetch_from)
-                + revisions
-            )
+            revisions = self.fetch_mw_revisions_for_page(page, page.pageid, fetch_from) + revisions
         return revisions
 
     def import_file_revision(
@@ -913,16 +884,12 @@ class GitRemoteMediaWiki:
             if separator and namespace:
                 namespace_id = self.get_mw_namespace_id(namespace)
                 if namespace_id and namespace_id == self.get_mw_namespace_id('File'):
-                    mediafile = self.get_mw_mediafile_for_page_revision(
-                        filename, timestamp
-                    )
+                    mediafile = self.get_mw_mediafile_for_page_revision(filename, timestamp)
             # If this is a revision of the media page for a new version of a
             # file, do one common commit for both file and media page.
             # Else do a commit only for that page.
             logger.warning(f'{n}/{total}: Revision #{rev["revid"]} of {commit.title}')
-            self.import_file_revision(
-                commit, fetch_from == 1, self.imported, mediafile
-            )
+            self.import_file_revision(commit, fetch_from == 1, self.imported, mediafile)
 
     #################################### push #################################
 
@@ -976,8 +943,7 @@ class GitRemoteMediaWiki:
             self.wiki.upload(complete_file_name, content, summary)
         except WIKI_ERRORS as error:
             raise SystemExit(
-                f'Failed to upload {complete_file_name} '
-                f'({type(error).__name__}: {error})'
+                f'Failed to upload {complete_file_name} ({type(error).__name__}: {error})'
             ) from error
         last_file_page = self.wiki.get_page(path)
         newrevid = (last_file_page or {}).get('revid')
@@ -1063,9 +1029,7 @@ class GitRemoteMediaWiki:
         for one_refspec in refspecs:
             match = re.match(r'^(\+)?([^:]*):([^:]*)$', one_refspec)
             if not match:
-                raise SystemExit(
-                    'Invalid refspec for push. Expected <src>:<dst> or +<src>:<dst>'
-                )
+                raise SystemExit('Invalid refspec for push. Expected <src>:<dst> or +<src>:<dst>')
             force, local, remote = match.groups()
             if force:
                 logger.warning('Warning: forced push not allowed on a MediaWiki.')
@@ -1156,9 +1120,7 @@ class GitRemoteMediaWiki:
             sha1_commit = commit_info_split[1]
             # TODO: we could detect renames, and encode them with a #redirect
             # on the wiki. TODO: for now, it's just a delete+add
-            diff_infos = run_git(
-                ['diff-tree', '-r', '--raw', '-z', sha1_child, sha1_commit]
-            )
+            diff_infos = run_git(['diff-tree', '-r', '--raw', '-z', sha1_child, sha1_commit])
             # git diff-tree -z gives an output like
             # <metadata>\0<filename1>\0
             # <metadata>\0<filename2>\0
@@ -1196,9 +1158,7 @@ class GitRemoteMediaWiki:
 
     def get_allowed_file_extensions(self) -> set[str]:
         result = self.wiki.query(meta='siteinfo', siprop='fileextensions')
-        return {
-            entry['ext'] for entry in result['query']['fileextensions']
-        }
+        return {entry['ext'] for entry in result['query']['fileextensions']}
 
     def get_mw_namespace_id(self, name: str) -> int | None:
         """Return the MediaWiki id for a canonical namespace name.
@@ -1219,9 +1179,7 @@ class GitRemoteMediaWiki:
                     self.namespace_id[namespace['*']] = namespace['id']
 
         if name not in self.namespace_id:
-            known = ' '.join(
-                namespace.replace(' ', '_') for namespace in sorted(self.namespace_id)
-            )
+            known = ' '.join(namespace.replace(' ', '_') for namespace in sorted(self.namespace_id))
             logger.warning(f'No such namespace {name} on MediaWiki, known namespaces: {known}')
             self.namespace_id[name] = None
 

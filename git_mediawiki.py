@@ -111,9 +111,7 @@ def git_config_all(name: str) -> list[str]:
     return run_git(['config', '--get-all', name], quiet=True).split()
 
 
-def git_credential(
-    credential: dict[str, str], operation: str = 'fill'
-) -> dict[str, str]:
+def git_credential(credential: dict[str, str], operation: str = 'fill') -> dict[str, str]:
     """Run ``git credential <operation>`` on a credential description.
 
     For ``fill`` the credential completed by Git is returned, for ``approve``
@@ -123,9 +121,7 @@ def git_credential(
         if value and ('\n' in value or '\0' in value):
             raise ValueError(f'invalid credential value for {key}')
 
-    request = ''.join(
-        f'{key}={value}\n' for key, value in credential.items() if value
-    )
+    request = ''.join(f'{key}={value}\n' for key, value in credential.items() if value)
     process = subprocess.run(
         ['git', 'credential', operation],
         input=f'{request}\n',
@@ -155,9 +151,7 @@ def clean_filename(filename: str) -> str:
     # Do a variant of URL-encoding, i.e. looks like URL-encoding, but with _
     # added to prevent MediaWiki from thinking this is an actual special
     # character.
-    return re.sub(
-        r'[\[\]{}|]', lambda match: f'_%_{ord(match.group()):x}', filename
-    )
+    return re.sub(r'[\[\]{}|]', lambda match: f'_%_{ord(match.group()):x}', filename)
 
 
 def smudge_filename(filename: str) -> str:

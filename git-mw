@@ -64,8 +64,20 @@ class TemplateMerger(HTMLParser):
     # Elements that never have a closing tag, and so cannot be descended into.
     VOID_ELEMENTS = frozenset(
         {
-            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-            'link', 'meta', 'param', 'source', 'track', 'wbr',
+            'area',
+            'base',
+            'br',
+            'col',
+            'embed',
+            'hr',
+            'img',
+            'input',
+            'link',
+            'meta',
+            'param',
+            'source',
+            'track',
+            'wbr',
         }
     )
 
@@ -146,13 +158,9 @@ class TemplateMerger(HTMLParser):
         self._emit(f'<![{data}]>')
 
 
-def merge_contents(
-    template: str, content: str, remote_url: str, remote_name: str
-) -> str:
+def merge_contents(template: str, content: str, remote_url: str, remote_name: str) -> str:
     """Insert ``content`` into ``template`` and absolutize its links."""
-    template_content_id = (
-        git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
-    )
+    template_content_id = git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
     logger.debug("Using '%s' as the content ID", template_content_id)
 
     merger = TemplateMerger(content, template_content_id, remote_url)
@@ -180,11 +188,7 @@ def is_valid_remote(remote: str) -> bool:
 
 
 def find_mediawiki_remotes() -> list[str]:
-    return [
-        remote
-        for remote in run_git(['remote']).split()
-        if mediawiki_remote_url_maybe(remote)
-    ]
+    return [remote for remote in run_git(['remote']).split() if mediawiki_remote_url_maybe(remote)]
 
 
 def find_upstream_remote_name() -> str | None:

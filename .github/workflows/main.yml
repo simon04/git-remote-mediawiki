@@ -15,15 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Ruff
+      - name: Lint
         run: uv run ruff check .
-
-  editorconfig:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Editorconfig
-        uses: zbeekman/EditorConfig-Action@master
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Format
+        run: uv run ruff format --check .
