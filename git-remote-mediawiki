@@ -15,6 +15,7 @@
 # Gateway between Git and MediaWiki.
 # Documentation & bugtracker: https://github.com/Git-Mediawiki/Git-Mediawiki
 
+import argparse
 import re
 import sys
 from datetime import UTC, datetime, timedelta
@@ -93,6 +94,17 @@ def fe_escape_path(path):
     """Quote ``path`` the way the fast-import stream expects it."""
     path = path.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
     return f'"{path}"'
+
+
+class CommandError(Exception):
+    """Raised when a remote-helper command line does not parse."""
+
+
+class CommandParser(argparse.ArgumentParser):
+    """An ArgumentParser that reports errors instead of exiting the helper."""
+
+    def error(self, message):
+        raise CommandError(message)
 
 
 class GitRemoteMediaWiki:
@@ -178,6 +190,8 @@ class GitRemoteMediaWiki:
         self.cached_mw_namespace_id = set()
         self.namespace_cache_loaded = False
 
+        self.command_parsers = self.build_command_parsers()
+
     ################################ error handling ###########################
 
     def fatal_mw_error(self, action, error=None):
@@ -204,37 +218,49 @@ class GitRemoteMediaWiki:
 
     ################################ command parser ###########################
 
+    def build_command_parsers(self):
+        """Build one argument parser per remote-helper command.
+
+        Each parser knows which method implements the command; the parsed
+        arguments are handed to it as keywords.
+        """
+        parsers = {}
+
+        def add(name, handler):
+            parser = CommandParser(prog=name, add_help=False)
+            parser.set_defaults(handler=handler)
+            parsers[name] = parser
+            return parser
+
+        add('capabilities', self.mw_capabilities)
+        add('list', self.mw_list).add_argument('for_push', nargs='?')
+        add('import', self.mw_import).add_argument('ref')
+        option = add('option', self.mw_option)
+        option.add_argument('name')
+        option.add_argument('value')
+        add('push', self.mw_push).add_argument('refspec', nargs='?', default=EMPTY)
+
+        return parsers
+
     def parse_command(self, line):
         """Run one remote-helper command; return False to stop the helper."""
-        cmd = line.split(' ')
-        if not cmd[0]:
+        words = line.split()
+        if not words:
             return False
-        name, args = cmd[0], cmd[1:]
-        if name == 'capabilities':
-            if args:
-                die('Too many arguments for capabilities')
-            self.mw_capabilities()
-        elif name == 'list':
-            if len(args) > 1:
-                die('Too many arguments for list')
-            self.mw_list()
-        elif name == 'import':
-            if not args or not args[0]:
-                die('Invalid argument for import')
-            if len(args) > 1:
-                die('Too many arguments for import')
-            self.mw_import(args[0])
-        elif name == 'option':
-            if len(args) < 2 or not args[0] or not args[1]:
-                die('Invalid arguments for option')
-            if len(args) > 2:
-                die('Too many arguments for option')
-            self.mw_option(args[0], args[1])
-        elif name == 'push':
-            self.mw_push(args[0] if args else EMPTY)
-        else:
+        command, *arguments = words
+
+        parser = self.command_parsers.get(command)
+        if parser is None:
             print('Unknown command. Aborting...', file=sys.stderr)
             return False
+
+        try:
+            args = vars(parser.parse_args(arguments))
+        except CommandError as error:
+            die(f'Invalid "{command}" command: {error}')
+
+        handler = args.pop('handler')
+        handler(**args)
         return True
 
     ################ Functions for listing pages on the remote wiki ###########
@@ -547,7 +573,7 @@ class GitRemoteMediaWiki:
             emit('no-private-update\n')
         emit('\n')
 
-    def mw_list(self):
+    def mw_list(self, for_push=None):
         # MediaWiki does not have branches, we consider one branch arbitrarily
         # called master, and HEAD pointing to it.
         emit('? refs/heads/master\n')
