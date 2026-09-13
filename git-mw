@@ -21,6 +21,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -161,383 +162,414 @@ class TemplateMerger(HTMLParser):
     def unknown_decl(self, data: str) -> None:
         self._emit(f'<![{data}]>')
 
+    @classmethod
+    def merge(cls, template: str, content: str, remote_url: str, remote_name: str) -> str:
+        """Insert ``content`` into ``template`` and absolutize its links."""
+        content_id = git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
+        logger.debug("Using '%s' as the content ID", content_id)
 
-def merge_contents(template: str, content: str, remote_url: str, remote_name: str) -> str:
-    """Insert ``content`` into ``template`` and absolutize its links."""
-    template_content_id = git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
-    logger.debug("Using '%s' as the content ID", template_content_id)
+        merger = cls(content, content_id, remote_url)
+        merger.feed(template)
+        merger.close()
 
-    merger = TemplateMerger(content, template_content_id, remote_url)
-    merger.feed(template)
-    merger.close()
+        if not merger.found:
+            logger.error(
+                'Could not combine the new content with the template. You might want to\n'
+                'configure `mediawiki.IDContent` in your config:\n'
+                '\tgit config --add remote.%s.mwIDcontent <id>\n'
+                'and re-run the command afterward.',
+                remote_name,
+            )
+            raise SystemExit(1)
 
-    if not merger.found:
-        logger.error(
-            'Could not combine the new content with the template. You might want to\n'
-            'configure `mediawiki.IDContent` in your config:\n'
-            '\tgit config --add remote.%s.mwIDcontent <id>\n'
-            'and re-run the command afterward.',
-            remote_name,
+        return merger.result()
+
+
+################################### Remotes ###################################
+
+
+@dataclass(frozen=True, slots=True)
+class Remote:
+    """A Git remote, and whether it points at a wiki."""
+
+    name: str
+
+    @classmethod
+    def names(cls) -> list[str]:
+        """Every remote configured in this repository."""
+        return run_git(['remote']).split()
+
+    @classmethod
+    def wikis(cls) -> list[str]:
+        """The remotes that are mediawikis."""
+        return [name for name in cls.names() if cls(name).wiki_url]
+
+    @classmethod
+    def upstream(cls) -> str | None:
+        """The remote the current branch tracks, if it tracks one."""
+        branch = run_git(['symbolic-ref', '--short', 'HEAD'], quiet=True).strip()
+        return git_config(f'branch.{branch}.remote') if branch else None
+
+    @property
+    def exists(self) -> bool:
+        return self.name in self.names()
+
+    @property
+    def wiki_url(self) -> str | None:
+        """The wiki address behind this remote, or None if it is not a wiki."""
+        prefix = 'mediawiki::'
+        url = git_config(f'remote.{self.name}.url')
+        return url.removeprefix(prefix) if url.startswith(prefix) else None
+
+
+################################### Preview ###################################
+
+
+class Preview:
+    """The ``git mw preview`` command: render a local file as the wiki would."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+
+    def run(self) -> None:
+        logger.debug('### Selecting remote')
+        remote_name, remote_url = self.select_remote(self.args.remote)
+        logger.debug('selected remote:\n\tname: %s\n\turl: %s', remote_name, remote_url)
+
+        try:
+            wiki = connect(remote_name, remote_url)
+        except WIKI_ERRORS as error:
+            raise SystemExit(f'Could not connect to {remote_url}: {error}') from error
+
+        file_content, file_name = self.read_file_content(self.args.file)
+
+        logger.debug('### Retrieving template')
+        wiki_page_name = re.sub(r'\.[^.]+$', '', clean_filename(file_name))
+        template = self.get_template(wiki, remote_url, wiki_page_name)
+
+        logger.debug('### Parsing local content')
+        try:
+            parsed = wiki.api('parse', text=file_content, title=wiki_page_name)
+        except WIKI_ERRORS as error:
+            raise SystemExit(f'No response from remote mediawiki: {error}') from error
+        new_content = parsed['parse']['text']['*']
+
+        logger.debug('### Merging contents')
+        preview_file_name = self.args.output
+        if not preview_file_name:
+            preview_file_name = re.sub(r'\.[^.]+$', '.html', file_name)
+        Path(preview_file_name).write_text(
+            TemplateMerger.merge(template, new_content, remote_url, remote_name),
+            encoding='utf-8',
         )
+
+        logger.debug('### Results')
+        if self.args.autoload:
+            logger.debug('Launching browser w/ file: %s', preview_file_name)
+            subprocess.run(['git', 'web--browse', preview_file_name], check=False)
+        else:
+            logger.info('Preview file saved as: %s', preview_file_name)
+
+    @staticmethod
+    def select_remote(remote_name: str) -> tuple[str, str]:
+        """Return the (name, url) of the mediawiki remote to preview against."""
+        if remote_name:
+            remote = Remote(remote_name)
+            if not remote.exists:
+                raise SystemExit(f'{remote_name} is not a remote')
+            if not remote.wiki_url:
+                raise SystemExit(f'{remote_name} is not a mediawiki remote')
+            return remote_name, remote.wiki_url
+
+        upstream = Remote.upstream()
+        remote_url = Remote(upstream).wiki_url if upstream else None
+        if upstream and remote_url:
+            return upstream, remote_url
+
+        valid_remotes = Remote.wikis()
+        if not valid_remotes:
+            logger.error('No mediawiki remote in this repo.')
+        else:
+            remotes_list = '\n\t'.join(valid_remotes)
+            logger.error(
+                'There are multiple mediawiki remotes, which of:\n'
+                '\t%s\n'
+                'do you want ? Use the -r option to specify the remote.',
+                remotes_list,
+            )
         raise SystemExit(1)
 
-    return merger.result()
+    @staticmethod
+    def read_file_content(file_name: str) -> tuple[str, str]:
+        """Return the content of ``file_name``, falling back to a Git blob."""
+        path = Path(file_name)
+        if path.exists():
+            return path.read_text(encoding='utf-8'), file_name
 
+        file_content = run_git(['cat-file', 'blob', file_name])
+        prefix, separator, suffix = file_name.rpartition(':')
+        if separator and prefix and suffix:
+            file_name = suffix
+        return file_content, file_name
 
-############################### Git helpers ###################################
+    @staticmethod
+    def get_template(wiki: MediaWiki, url: str, page_name: str) -> str:
+        """Retrieve the HTML rendering of ``page_name``, used as a template."""
+        response = wiki.session.get(f'{url}/index.php', params={'title': page_name})
+        if response.status_code == HTTP_CODE_OK:
+            return response.text
 
+        code = response.status_code
+        url_after = response.url  # resolve all redirections
+        if code != HTTP_CODE_PAGE_NOT_FOUND:
+            raise SystemExit(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
 
-def is_valid_remote(remote: str) -> bool:
-    return remote in run_git(['remote']).split()
-
-
-def find_mediawiki_remotes() -> list[str]:
-    return [remote for remote in run_git(['remote']).split() if mediawiki_remote_url_maybe(remote)]
-
-
-def find_upstream_remote_name() -> str | None:
-    current_branch = run_git(['symbolic-ref', '--short', 'HEAD'], quiet=True).strip()
-    if not current_branch:
-        return None
-    return git_config(f'branch.{current_branch}.remote')
-
-
-def mediawiki_remote_url_maybe(remote: str) -> str | None:
-    """Return the wiki URL of ``remote``, or None if it is not a wiki."""
-    remote_url = git_config(f'remote.{remote}.url')
-    prefix = 'mediawiki::'
-    if remote_url.startswith(prefix):
-        return remote_url[len(prefix) :]
-    return None
-
-
-############################# Preview Functions ###############################
-
-
-def get_template(wiki: MediaWiki, url: str, page_name: str) -> str:
-    """Retrieve the HTML rendering of ``page_name``, used as a template."""
-    response = wiki.session.get(f'{url}/index.php', params={'title': page_name})
-    if response.status_code == HTTP_CODE_OK:
+        logger.debug(
+            "Warning: Failed to retrieve '%s'. Create it on the mediawiki if you want\n"
+            'all the links to work properly.\n'
+            'Trying to use the mediawiki homepage as a fallback template ...',
+            page_name,
+        )
+        # requests automatically redirects GET requests
+        response = wiki.session.get(f'{url}/index.php')
+        if response.status_code != HTTP_CODE_OK:
+            raise SystemExit(f'Failed to get homepage @ {response.url} w/ code {code}')
         return response.text
 
-    code = response.status_code
-    url_after = response.url  # resolve all redirections
-    if code != HTTP_CODE_PAGE_NOT_FOUND:
-        raise SystemExit(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
 
-    logger.debug(
-        "Warning: Failed to retrieve '%s'. Create it on the mediawiki if you want\n"
-        'all the links to work properly.\n'
-        'Trying to use the mediawiki homepage as a fallback template ...',
-        page_name,
-    )
-    # requests automatically redirects GET requests
-    response = wiki.session.get(f'{url}/index.php')
-    if response.status_code != HTTP_CODE_OK:
-        raise SystemExit(f'Failed to get homepage @ {response.url} w/ code {code}')
-    return response.text
+#################################### Setup ####################################
 
 
-def select_remote(remote_name: str) -> tuple[str, str]:
-    """Return the (name, url) of the mediawiki remote to preview against."""
-    if remote_name:
-        if not is_valid_remote(remote_name):
-            raise SystemExit(f'{remote_name} is not a remote')
-        remote_url = mediawiki_remote_url_maybe(remote_name)
-        if not remote_url:
-            raise SystemExit(f'{remote_name} is not a mediawiki remote')
-        return remote_name, remote_url
+class Setup:
+    """The ``git mw setup`` command: a questionnaire that ends in a clone.
 
-    upstream = find_upstream_remote_name()
-    remote_url = mediawiki_remote_url_maybe(upstream) if upstream else None
-    if upstream and remote_url:
-        return upstream, remote_url
-
-    valid_remotes = find_mediawiki_remotes()
-    if not valid_remotes:
-        logger.error('No mediawiki remote in this repo.')
-    else:
-        remotes_list = '\n\t'.join(valid_remotes)
-        logger.error(
-            'There are multiple mediawiki remotes, which of:\n'
-            '\t%s\n'
-            'do you want ? Use the -r option to specify the remote.',
-            remotes_list,
-        )
-    raise SystemExit(1)
-
-
-def read_file_content(file_name: str) -> tuple[str, str]:
-    """Return the content of ``file_name``, falling back to a Git blob."""
-    path = Path(file_name)
-    if path.exists():
-        return path.read_text(encoding='utf-8'), file_name
-
-    file_content = run_git(['cat-file', 'blob', file_name])
-    prefix, separator, suffix = file_name.rpartition(':')
-    if separator and prefix and suffix:
-        file_name = suffix
-    return file_content, file_name
-
-
-def preview(args: argparse.Namespace) -> None:
-    logger.debug('### Selecting remote')
-    remote_name, remote_url = select_remote(args.remote)
-    logger.debug('selected remote:\n\tname: %s\n\turl: %s', remote_name, remote_url)
-
-    try:
-        wiki = connect(remote_name, remote_url)
-    except WIKI_ERRORS as error:
-        raise SystemExit(f'Could not connect to {remote_url}: {error}') from error
-
-    file_content, file_name = read_file_content(args.file)
-
-    logger.debug('### Retrieving template')
-    wiki_page_name = re.sub(r'\.[^.]+$', '', clean_filename(file_name))
-    template = get_template(wiki, remote_url, wiki_page_name)
-
-    logger.debug('### Parsing local content')
-    try:
-        parsed = wiki.api('parse', text=file_content, title=wiki_page_name)
-    except WIKI_ERRORS as error:
-        raise SystemExit(f'No response from remote mediawiki: {error}') from error
-    new_content = parsed['parse']['text']['*']
-
-    logger.debug('### Merging contents')
-    preview_file_name = args.output
-    if not preview_file_name:
-        preview_file_name = re.sub(r'\.[^.]+$', '.html', file_name)
-    Path(preview_file_name).write_text(
-        merge_contents(template, new_content, remote_url, remote_name),
-        encoding='utf-8',
-    )
-
-    logger.debug('### Results')
-    if args.autoload:
-        logger.debug('Launching browser w/ file: %s', preview_file_name)
-        subprocess.run(['git', 'web--browse', preview_file_name], check=False)
-    else:
-        logger.info('Preview file saved as: %s', preview_file_name)
-
-
-################################ Setup wizard #################################
-
-
-def read_line(prompt: str) -> str:
-    """Read one answer, treating end of input or an interrupt as cancellation."""
-    try:
-        return input(prompt)
-    except EOFError, KeyboardInterrupt:
-        print()
-        raise SystemExit('Cancelled. Nothing was written.') from None
-
-
-def ask(question: str, default: str = '') -> str:
-    """Ask for a line of input, offering ``default`` if there is one."""
-    prompt = f'{question} [{default}]: ' if default else f'{question}: '
-    while True:
-        answer = read_line(prompt).strip()
-        if answer:
-            return answer
-        if default:
-            return default
-
-
-def ask_yes_no(question: str, default: bool) -> bool:
-    """Ask a yes or no question."""
-    prompt = f'{question} [{"Y/n" if default else "y/N"}]: '
-    while True:
-        answer = read_line(prompt).strip().lower()
-        if not answer:
-            return default
-        if answer in ('y', 'yes'):
-            return True
-        if answer in ('n', 'no'):
-            return False
-        print('Please answer yes or no.')
-
-
-def ask_choice(question: str, options: Sequence[tuple[str, str]]) -> str:
-    """Ask the user to pick one of ``options``, each a (value, label) pair."""
-    print(question)
-    for number, (_, label) in enumerate(options, start=1):
-        print(f'  {number}. {label}')
-    while True:
-        answer = read_line(f'Choice [1-{len(options)}]: ').strip()
-        if answer.isdigit() and 1 <= int(answer) <= len(options):
-            return options[int(answer) - 1][0]
-        print(f'Please enter a number between 1 and {len(options)}.')
-
-
-def wiki_url_candidates(url: str) -> list[str]:
-    """The address as typed, then the usual ways of getting it slightly wrong.
-
-    The address wanted is the one holding api.php, which on Wikipedia is /w
-    while articles are served from /wiki.
+    Each step checks its answer against the wiki, so a mistyped address, page
+    or password is caught here rather than part-way through a clone.
     """
-    url = url.rstrip('/')
-    candidates = [url]
-    if url.endswith('/wiki'):
-        candidates.append(f'{url.removesuffix("/wiki")}/w')
-    candidates.append(f'{url}/w')
-    return list(dict.fromkeys(candidates))
 
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
 
-def ask_wiki() -> tuple[MediaWiki, str]:
-    """Ask for a wiki address until one of them answers."""
-    while True:
-        typed = ask('Address of the wiki', 'https://en.wikipedia.org/w')
-        for url in wiki_url_candidates(typed):
-            try:
-                wiki = MediaWiki(url)
-            except WIKI_ERRORS as error:
-                print(f'  {url}/api.php did not answer: {error}')
-                continue
-            if url != typed:
-                print(f'  using {url}, which is where api.php lives')
-            name = wiki.info.get('sitename', url)
-            print(f'  connected to {name}, {wiki.info.get("generator", "MediaWiki")}')
-            return wiki, url
+    def run(self) -> None:
+        print('This asks a few questions, checks the answers against the wiki, and')
+        print('then runs the git clone they describe. Nothing is written until the')
+        print('command is shown and confirmed.')
+        print()
 
+        wiki, url = self.ask_wiki()
+        config: dict[str, str] = {}
 
-def ask_pages(wiki: MediaWiki) -> str:
-    """Ask for page titles and check them against the wiki."""
-    print('Write a space in a title as an underscore, as the config does.')
-    while True:
-        titles = ask('Page titles, separated by spaces').split()
-        query = wiki.query(titles='|'.join(titles)).get('query', {})
-        for renamed in query.get('normalized', []):
-            print(f'  {renamed["from"]} is the page "{renamed["to"]}"')
-        missing = [
-            page['title'] for page_id, page in query.get('pages', {}).items() if int(page_id) < 0
+        print()
+        tracking = self.ask_choice(
+            'Which pages should the repository track?',
+            [
+                ('pages', 'Named pages'),
+                ('categories', 'Every page in a category'),
+                ('namespaces', 'Every page in a namespace'),
+                ('all', 'The whole wiki, which on a large one is a great many pages'),
+            ],
+        )
+        if tracking == 'pages':
+            config['pages'] = self.ask_pages(wiki)
+        elif tracking == 'categories':
+            config['categories'] = self.ask_category(wiki)
+        elif tracking == 'namespaces':
+            config['namespaces'] = self.ask_namespace(wiki)
+
+        print()
+        if self.ask_yes_no('Will you push changes back to the wiki?', default=False):
+            login = self.ask_login(wiki, url)
+            if login:
+                config['mwLogin'] = login
+        else:
+            # Otherwise every non-.mw file committed is attempted as an upload.
+            config['mediaexport'] = 'false'
+
+        print()
+        if self.ask_yes_no('Import media files used by those pages?', default=False):
+            config['mediaimport'] = 'true'
+
+        print()
+        directory = self.ask('Directory to create', self.slugify(wiki.info.get('sitename', '')))
+        command = [
+            'git',
+            'clone',
+            *itertools.chain.from_iterable(
+                ('-c', f'remote.origin.{name}={value}') for name, value in config.items()
+            ),
+            f'mediawiki::{url}',
+            directory,
         ]
-        for title in missing:
-            print(f'  there is no page "{title}"')
-        if not missing or ask_yes_no('Track them anyway?', default=False):
-            return ' '.join(titles)
+        print()
+        print('About to run:')
+        print(f'  {shlex.join(command)}')
+        print()
+        if not self.ask_yes_no('Run it now?', default=True):
+            print('Nothing was written. The command above does it when you are ready.')
+            return
+        raise SystemExit(subprocess.run(command, check=False).returncode)
 
+    ################################## prompts ################################
 
-def ask_category(wiki: MediaWiki) -> str:
-    """Ask for a category and check that it has members."""
-    while True:
-        name = ask('Category, without the "Category:" prefix')
-        result = wiki.query(list='categorymembers', cmtitle=f'Category:{name}', cmlimit=50)
-        members = result.get('query', {}).get('categorymembers', [])
-        if not members:
-            print(f'  Category:{name} has no pages')
-            continue
-        print(f'  {len(members)}{" or more" if "continue" in result else ""} pages:')
-        for page in members[:5]:
-            print(f'    {page["title"]}')
-        return name.replace(' ', '_')
-
-
-def ask_namespace(wiki: MediaWiki) -> str:
-    """Offer the wiki's own namespaces and ask for one."""
-    namespaces = wiki.query(meta='siteinfo', siprop='namespaces')['query']['namespaces']
-    options = []
-    for namespace in sorted(namespaces.values(), key=lambda ns: ns['id']):
-        if namespace['id'] < 0:
-            continue  # Special and Media are virtual; allpages cannot list them
-        # The main namespace has no canonical name; the config calls it (Main).
-        canonical = namespace.get('canonical') or '(Main)'
-        local = namespace.get('*') or '(Main)'
-        label = canonical if local == canonical else f'{canonical} ({local})'
-        options.append((canonical.replace(' ', '_'), label))
-    return ask_choice('Which namespace?', options)
-
-
-def ask_login(wiki: MediaWiki, url: str) -> str:
-    """Ask for a bot password, check it, and hand it to git credential."""
-    print()
-    print('Pushing needs an account. Wikimedia wikis, Wikipedia among them, do')
-    print('not accept a main-account password here and want a bot password:')
-    print(f'  {url}/index.php?title=Special:BotPasswords')
-    print('Grant it at least "Edit existing pages".')
-    while True:
-        login = ask('Login name, of the form YourName@labelyoupicked')
+    @staticmethod
+    def read_line(prompt: str) -> str:
+        """Read one answer, treating end of input or an interrupt as cancellation."""
         try:
-            password = getpass.getpass('Password (not echoed): ')
+            return input(prompt)
         except EOFError, KeyboardInterrupt:
             print()
             raise SystemExit('Cancelled. Nothing was written.') from None
-        try:
-            wiki.login(login, password)
-        except WIKI_ERRORS as error:
-            print(f'  the wiki refused that login: {error}')
-            if not ask_yes_no('Try again?', default=True):
-                return ''
-            continue
-        print(f'  logged in as {wiki.site.username}')
-        git_credential({'url': url, 'username': login, 'password': password}, 'approve')
-        print('  password handed to git credential, so it is asked for once only')
-        return login
 
+    @classmethod
+    def ask(cls, question: str, default: str = '') -> str:
+        """Ask for a line of input, offering ``default`` if there is one."""
+        prompt = f'{question} [{default}]: ' if default else f'{question}: '
+        while True:
+            answer = cls.read_line(prompt).strip()
+            if answer:
+                return answer
+            if default:
+                return default
 
-def setup(args: argparse.Namespace) -> None:
-    """Walk the user through cloning part of a wiki."""
-    print('This asks a few questions, checks the answers against the wiki, and')
-    print('then runs the git clone they describe. Nothing is written until the')
-    print('command is shown and confirmed.')
-    print()
+    @classmethod
+    def ask_yes_no(cls, question: str, default: bool) -> bool:
+        """Ask a yes or no question."""
+        prompt = f'{question} [{"Y/n" if default else "y/N"}]: '
+        while True:
+            answer = cls.read_line(prompt).strip().lower()
+            if not answer:
+                return default
+            if answer in ('y', 'yes'):
+                return True
+            if answer in ('n', 'no'):
+                return False
+            print('Please answer yes or no.')
 
-    wiki, url = ask_wiki()
-    config: dict[str, str] = {}
+    @classmethod
+    def ask_choice(cls, question: str, options: Sequence[tuple[str, str]]) -> str:
+        """Ask the user to pick one of ``options``, each a (value, label) pair."""
+        print(question)
+        for number, (_, label) in enumerate(options, start=1):
+            print(f'  {number}. {label}')
+        while True:
+            answer = cls.read_line(f'Choice [1-{len(options)}]: ').strip()
+            if answer.isdigit() and 1 <= int(answer) <= len(options):
+                return options[int(answer) - 1][0]
+            print(f'Please enter a number between 1 and {len(options)}.')
 
-    print()
-    tracking = ask_choice(
-        'Which pages should the repository track?',
-        [
-            ('pages', 'Named pages'),
-            ('categories', 'Every page in a category'),
-            ('namespaces', 'Every page in a namespace'),
-            ('all', 'The whole wiki, which on a large one is a great many pages'),
-        ],
-    )
-    if tracking == 'pages':
-        config['pages'] = ask_pages(wiki)
-    elif tracking == 'categories':
-        config['categories'] = ask_category(wiki)
-    elif tracking == 'namespaces':
-        config['namespaces'] = ask_namespace(wiki)
+    ################################# questions ###############################
 
-    print()
-    if ask_yes_no('Will you push changes back to the wiki?', default=False):
-        login = ask_login(wiki, url)
-        if login:
-            config['mwLogin'] = login
-    else:
-        # Otherwise every non-.mw file committed is attempted as an upload.
-        config['mediaexport'] = 'false'
+    @staticmethod
+    def url_candidates(url: str) -> list[str]:
+        """The address as typed, then the usual ways of getting it slightly wrong.
 
-    print()
-    if ask_yes_no('Import media files used by those pages?', default=False):
-        config['mediaimport'] = 'true'
+        The address wanted is the one holding api.php, which on Wikipedia is /w
+        while articles are served from /wiki.
+        """
+        url = url.rstrip('/')
+        candidates = [url]
+        if url.endswith('/wiki'):
+            candidates.append(f'{url.removesuffix("/wiki")}/w')
+        candidates.append(f'{url}/w')
+        return list(dict.fromkeys(candidates))
 
-    print()
-    directory = ask('Directory to create', slugify(wiki.info.get('sitename', '')))
-    command = [
-        'git',
-        'clone',
-        *itertools.chain.from_iterable(
-            ('-c', f'remote.origin.{name}={value}') for name, value in config.items()
-        ),
-        f'mediawiki::{url}',
-        directory,
-    ]
-    print()
-    print('About to run:')
-    print(f'  {shlex.join(command)}')
-    print()
-    if not ask_yes_no('Run it now?', default=True):
-        print('Nothing was written. The command above does it when you are ready.')
-        return
-    raise SystemExit(subprocess.run(command, check=False).returncode)
+    @classmethod
+    def ask_wiki(cls) -> tuple[MediaWiki, str]:
+        """Ask for a wiki address until one of them answers."""
+        while True:
+            typed = cls.ask('Address of the wiki', 'https://en.wikipedia.org/w')
+            for url in cls.url_candidates(typed):
+                try:
+                    wiki = MediaWiki(url)
+                except WIKI_ERRORS as error:
+                    print(f'  {url}/api.php did not answer: {error}')
+                    continue
+                if url != typed:
+                    print(f'  using {url}, which is where api.php lives')
+                name = wiki.info.get('sitename', url)
+                print(f'  connected to {name}, {wiki.info.get("generator", "MediaWiki")}')
+                return wiki, url
 
+    @classmethod
+    def ask_pages(cls, wiki: MediaWiki) -> str:
+        """Ask for page titles and check them against the wiki."""
+        print('Write a space in a title as an underscore, as the config does.')
+        while True:
+            titles = cls.ask('Page titles, separated by spaces').split()
+            query = wiki.query(titles='|'.join(titles)).get('query', {})
+            for renamed in query.get('normalized', []):
+                print(f'  {renamed["from"]} is the page "{renamed["to"]}"')
+            missing = [
+                page['title']
+                for page_id, page in query.get('pages', {}).items()
+                if int(page_id) < 0
+            ]
+            for title in missing:
+                print(f'  there is no page "{title}"')
+            if not missing or cls.ask_yes_no('Track them anyway?', default=False):
+                return ' '.join(titles)
 
-def slugify(name: str) -> str:
-    """Turn a wiki's name into something usable as a directory name."""
-    return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'wiki'
+    @classmethod
+    def ask_category(cls, wiki: MediaWiki) -> str:
+        """Ask for a category and check that it has members."""
+        while True:
+            name = cls.ask('Category, without the "Category:" prefix')
+            result = wiki.query(list='categorymembers', cmtitle=f'Category:{name}', cmlimit=50)
+            members = result.get('query', {}).get('categorymembers', [])
+            if not members:
+                print(f'  Category:{name} has no pages')
+                continue
+            print(f'  {len(members)}{" or more" if "continue" in result else ""} pages:')
+            for page in members[:5]:
+                print(f'    {page["title"]}')
+            return name.replace(' ', '_')
+
+    @classmethod
+    def ask_namespace(cls, wiki: MediaWiki) -> str:
+        """Offer the wiki's own namespaces and ask for one."""
+        namespaces = wiki.query(meta='siteinfo', siprop='namespaces')['query']['namespaces']
+        options = []
+        for namespace in sorted(namespaces.values(), key=lambda ns: ns['id']):
+            if namespace['id'] < 0:
+                continue  # Special and Media are virtual; allpages cannot list them
+            # The main namespace has no canonical name; the config calls it (Main).
+            canonical = namespace.get('canonical') or '(Main)'
+            local = namespace.get('*') or '(Main)'
+            label = canonical if local == canonical else f'{canonical} ({local})'
+            options.append((canonical.replace(' ', '_'), label))
+        return cls.ask_choice('Which namespace?', options)
+
+    @classmethod
+    def ask_login(cls, wiki: MediaWiki, url: str) -> str:
+        """Ask for a bot password, check it, and hand it to git credential."""
+        print()
+        print('Pushing needs an account. Wikimedia wikis, Wikipedia among them, do')
+        print('not accept a main-account password here and want a bot password:')
+        print(f'  {url}/index.php?title=Special:BotPasswords')
+        print('Grant it at least "Edit existing pages".')
+        while True:
+            login = cls.ask('Login name, of the form YourName@labelyoupicked')
+            try:
+                password = getpass.getpass('Password (not echoed): ')
+            except EOFError, KeyboardInterrupt:
+                print()
+                raise SystemExit('Cancelled. Nothing was written.') from None
+            try:
+                wiki.login(login, password)
+            except WIKI_ERRORS as error:
+                print(f'  the wiki refused that login: {error}')
+                if not cls.ask_yes_no('Try again?', default=True):
+                    return ''
+                continue
+            print(f'  logged in as {wiki.site.username}')
+            git_credential({'url': url, 'username': login, 'password': password}, 'approve')
+            print('  password handed to git credential, so it is asked for once only')
+            return login
+
+    @staticmethod
+    def slugify(name: str) -> str:
+        """Turn a wiki's name into something usable as a directory name."""
+        return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'wiki'
 
 
 #################################### Main #####################################
@@ -663,9 +695,9 @@ def main(argv: Sequence[str]) -> None:
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     if args.command == 'preview':
-        preview(args)
+        Preview(args).run()
     elif args.command == 'setup':
-        setup(args)
+        Setup(args).run()
     else:
         parser.print_help()
 
