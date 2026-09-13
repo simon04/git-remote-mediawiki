@@ -20,6 +20,7 @@ import itertools
 import re
 import sys
 from datetime import UTC, datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 
 # Allow the sibling git_mediawiki module to be imported even when this script
@@ -31,7 +32,7 @@ from git_mediawiki import (
     WIKI_ERRORS,
     APIError,
     clean_filename,
-    connect_maybe,
+    connect,
     git_config,
     git_config_all,
     git_config_bool,
@@ -177,18 +178,22 @@ class GitRemoteMediaWiki:
         # and '@' sign, to avoid author like MWUser@HTTPUser@host.com
         self.wiki_name = re.sub(r'^.*@', '', wiki_name)
 
-        # MediaWiki API instance, created lazily.
-        self.mediawiki = None
-
         # Remember the timestamp corresponding to a revision id.
         self.basetimestamps = {}
 
-        # In memory cache for MediaWiki namespace ids.
+        # In memory cache for MediaWiki namespace ids, seeded from the
+        # configuration file, where they are stored as
+        # "Name_of_namespace:Id_namespace", ex.: "File:6".
         self.namespace_id = {}
-        # Namespaces whose id is cached in the configuration file
-        # (to avoid duplicates)
-        self.cached_mw_namespace_id = set()
-        self.namespace_cache_loaded = False
+        for entry in run_git(
+            ['config', '--get-all', f'remote.{remotename}.namespaceCache'], quiet=True
+        ).splitlines():
+            name, _, namespace_id = entry.partition(':')
+            self.namespace_id[name] = (
+                None if namespace_id == 'notANameSpace' else int(namespace_id)
+            )
+        # Namespaces already on disk, which must not be written out again.
+        self.cached_mw_namespace_id = set(self.namespace_id)
 
         self.command_parsers = self.build_command_parsers()
 
@@ -207,14 +212,17 @@ class GitRemoteMediaWiki:
             warn(f'fatal: (error {error})')
         raise SystemExit(1)
 
+    @cached_property
+    def wiki(self):
+        """The remote wiki, connected and logged in on first use."""
+        try:
+            return connect(self.remotename, self.url)
+        except WIKI_ERRORS as error:
+            self.fatal_mw_error('connect to the wiki', error)
+
     def connect(self):
-        """Connect to the remote wiki, at most once."""
-        if self.mediawiki is None:
-            try:
-                self.mediawiki = connect_maybe(None, self.remotename, self.url)
-            except WIKI_ERRORS as error:
-                self.fatal_mw_error('connect to the wiki', error)
-        return self.mediawiki
+        """Connect now, so that the login message precedes progress output."""
+        return self.wiki
 
     ################################ command parser ###########################
 
@@ -278,7 +286,6 @@ class GitRemoteMediaWiki:
 
     def get_mw_tracked_categories(self):
         """Return the pages of the tracked categories, keyed by title."""
-        wiki = self.connect()
         pages = {}
         for category in self.tracked_categories:
             if ':' not in category:
@@ -286,7 +293,7 @@ class GitRemoteMediaWiki:
                 # the user to specify it.
                 category = f'Category:{category}'
             try:
-                mw_pages = wiki.query_list(
+                mw_pages = self.wiki.query_list(
                     'categorymembers', cmtitle=category, cmlimit='max'
                 )
             except WIKI_ERRORS as error:
@@ -296,7 +303,6 @@ class GitRemoteMediaWiki:
 
     def get_mw_tracked_namespaces(self):
         """Return the pages of the tracked namespaces, keyed by title."""
-        wiki = self.connect()
         pages = {}
         for local_namespace in sorted(self.tracked_namespaces):
             if local_namespace == '(Main)':
@@ -307,7 +313,7 @@ class GitRemoteMediaWiki:
             if namespace_id is None or namespace_id < 0:
                 continue
             try:
-                mw_pages = wiki.query_list(
+                mw_pages = self.wiki.query_list(
                     'allpages', apnamespace=namespace_id, aplimit='max'
                 )
             except WIKI_ERRORS as error:
@@ -319,20 +325,18 @@ class GitRemoteMediaWiki:
     def get_mw_all_pages(self):
         """Return every page of the wiki, keyed by title."""
         # No user-provided list, get the list of pages from the API.
-        wiki = self.connect()
         try:
-            mw_pages = wiki.query_list('allpages', aplimit='max')
+            mw_pages = self.wiki.query_list('allpages', aplimit='max')
         except WIKI_ERRORS as error:
             self.fatal_mw_error('get the list of wiki pages', error)
         return {page['title']: page for page in mw_pages}
 
     def get_mw_first_pages(self, some_pages):
         """Query the wiki for a slice of the page list, keyed by title."""
-        wiki = self.connect()
         # pattern 'page1|page2|...' required by the API
         titles = '|'.join(some_pages)
         try:
-            mw_pages = wiki.query(titles=titles)
+            mw_pages = self.wiki.query(titles=titles)
         except WIKI_ERRORS as error:
             self.fatal_mw_error('query the list of wiki pages', error)
 
@@ -382,9 +386,8 @@ class GitRemoteMediaWiki:
         # Attach list of all pages for media files from the API, they are in a
         # different namespace, only one namespace can be queried at the same
         # moment
-        wiki = self.connect()
         try:
-            mw_pages = wiki.query_list(
+            mw_pages = self.wiki.query_list(
                 'allpages',
                 apnamespace=self.get_mw_namespace_id('File'),
                 aplimit='max',
@@ -399,7 +402,6 @@ class GitRemoteMediaWiki:
 
     def get_linked_mediafiles(self, pages):
         """Return the media files included or linked from ``pages``."""
-        wiki = self.connect()
         titles = [page['title'] for page in pages.values()]
         mediafiles = {}
 
@@ -409,7 +411,7 @@ class GitRemoteMediaWiki:
 
             # Media files could be included or linked from a page, get all
             # related
-            result = wiki.query(
+            result = self.wiki.query(
                 prop='links|images',
                 titles=mw_titles,
                 plnamespace=self.get_mw_namespace_id('File'),
@@ -428,10 +430,9 @@ class GitRemoteMediaWiki:
         if timestamp is None:
             return {}
 
-        wiki = self.connect()
         # Search if a media file with the given timestamp exists on MediaWiki.
         # In that case download the file.
-        result = wiki.query(
+        result = self.wiki.query(
             prop='imageinfo',
             titles=f'File:{filename}',
             iistart=timestamp,
@@ -463,8 +464,7 @@ class GitRemoteMediaWiki:
         }
 
     def download_mw_mediafile(self, download_url):
-        wiki = self.connect()
-        response = wiki.session.get(download_url)
+        response = self.wiki.session.get(download_url)
         if response.status_code == HTTP_CODE_OK:
             return response.content
         if not download_url.startswith(self.url) and f'{self.wiki_name}/' in download_url:
@@ -513,15 +513,13 @@ class GitRemoteMediaWiki:
         This makes a single request to the wiki, thus avoiding a loop over all
         tracked pages. This is useful for the fetch-by-rev option.
         """
-        wiki = self.connect()
-        result = wiki.query(
+        result = self.wiki.query(
             list='recentchanges', prop='revisions', rclimit='1', rcdir='older'
         )
         return result['query']['recentchanges'][0]['revid']
 
     def get_last_remote_revision(self):
         """Return the last revision id of the tracked pages and categories."""
-        wiki = self.connect()
 
         pages = list(self.get_mw_pages().values())
         max_rev_num = 0
@@ -530,7 +528,7 @@ class GitRemoteMediaWiki:
 
         for page in pages:
             page_id = page['pageid']
-            result = wiki.query(
+            result = self.wiki.query(
                 prop='revisions', rvprop='ids|timestamp', pageids=page_id
             )
             revisions = result['query']['pages'][str(page_id)].get('revisions')
@@ -594,7 +592,6 @@ class GitRemoteMediaWiki:
     ################################### import ################################
 
     def fetch_mw_revisions_for_page(self, page, page_id, fetch_from):
-        wiki = self.connect()
         page_revs = []
         query = {
             'prop': 'revisions',
@@ -611,7 +608,7 @@ class GitRemoteMediaWiki:
 
         # Get 500 revisions at a time due to the mediawiki api limit
         while True:
-            result = wiki.query(**query)
+            result = self.wiki.query(**query)
 
             revisions = (
                 result.get('query', {})
@@ -770,7 +767,6 @@ class GitRemoteMediaWiki:
         ``revision_ids`` is a list of revision numbers, ``pages`` a mapping
         keyed by page title: only revisions of those pages are imported.
         """
-        wiki = self.connect()
         n = 0
         n_actual = 0
         total = len(revision_ids)
@@ -783,7 +779,7 @@ class GitRemoteMediaWiki:
             # fetch the content of the pages
             revs = '|'.join(str(revid) for revid in page_rev_ids)
             try:
-                result = wiki.query(
+                result = self.wiki.query(
                     prop='revisions',
                     rvprop='content|timestamp|comment|user|ids',
                     revids=revs,
@@ -875,11 +871,10 @@ class GitRemoteMediaWiki:
             warn('Check the configuration of file uploads in your mediawiki.')
             return newrevid
 
-        wiki = self.connect()
         # Deleting and uploading a file requires a privileged user
         if file_deleted:
             try:
-                wiki.delete(title=path, reason=summary)
+                self.wiki.delete(title=path, reason=summary)
             except WIKI_ERRORS as error:
                 warn('Failed to delete file on remote wiki')
                 warn('Check your permissions on the remote site. Error code:')
@@ -893,10 +888,10 @@ class GitRemoteMediaWiki:
             return newrevid
 
         try:
-            wiki.upload(complete_file_name, content, summary)
+            self.wiki.upload(complete_file_name, content, summary)
         except WIKI_ERRORS as error:
             raise SystemExit(error) from error
-        last_file_page = wiki.get_page(path)
+        last_file_page = self.wiki.get_page(path)
         newrevid = (last_file_page or {}).get('revid')
         warn(f'Pushed file: {new_sha1} - {complete_file_name}.')
         return newrevid
@@ -939,7 +934,6 @@ class GitRemoteMediaWiki:
             else:
                 file_content = run_git(['cat-file', 'blob', new_sha1])
 
-            wiki = self.connect()
             params = {
                 'summary': summary,
                 'title': title,
@@ -950,7 +944,7 @@ class GitRemoteMediaWiki:
                 params['basetimestamp'] = basetimestamp
 
             try:
-                result = wiki.edit(**params)
+                result = self.wiki.edit(**params)
             except APIError as error:
                 # edit conflicts, considered as non-fast-forward
                 warn(f'Warning: Error {error} from mediawiki.')
@@ -1104,46 +1098,21 @@ class GitRemoteMediaWiki:
     ################################## namespaces #############################
 
     def get_allowed_file_extensions(self):
-        wiki = self.connect()
-        result = wiki.query(meta='siteinfo', siprop='fileextensions')
+        result = self.wiki.query(meta='siteinfo', siprop='fileextensions')
         return {
             entry['ext'] for entry in result['query']['fileextensions']
         }
-
-    def load_namespace_cache(self):
-        """Load the namespace ids cached in the configuration file.
-
-        Namespaces are stored in the form "Name_of_namespace:Id_namespace",
-        ex.: "File:6".
-        """
-        if self.namespace_cache_loaded:
-            return
-        self.namespace_cache_loaded = True
-        cached = run_git(
-            ['config', '--get-all', f'remote.{self.remotename}.namespaceCache'],
-            quiet=True,
-        )
-        for entry in cached.splitlines():
-            name, _, namespace_id = entry.partition(':')
-            if namespace_id == 'notANameSpace':
-                self.namespace_id[name] = None
-            else:
-                self.namespace_id[name] = int(namespace_id)
-            self.cached_mw_namespace_id.add(name)
 
     def get_mw_namespace_id(self, name):
         """Return the MediaWiki id for a canonical namespace name.
 
         Ex.: "File", "Project". Returns None when there is no such namespace.
         """
-        self.load_namespace_cache()
-
         if name not in self.namespace_id:
             warn(f'Namespace {name} not found in cache, querying the wiki ...')
             # NS not found => get namespace ids from MW and store the requested
             # one in the configuration file.
-            wiki = self.connect()
-            result = wiki.query(meta='siteinfo', siprop='namespaces')
+            result = self.wiki.query(meta='siteinfo', siprop='namespaces')
             for namespace in result['query']['namespaces'].values():
                 if namespace.get('id') is None or namespace.get('canonical') is None:
                     continue

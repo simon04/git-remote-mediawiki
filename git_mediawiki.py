@@ -41,7 +41,7 @@ __all__ = [
     'APIError',
     'MediaWiki',
     'clean_filename',
-    'connect_maybe',
+    'connect',
     'git_config',
     'git_config_all',
     'git_config_bool',
@@ -260,11 +260,8 @@ def revision_content(revision):
     return revision.get('*')
 
 
-def connect_maybe(wiki, remote_name, remote_url):
-    """Return ``wiki`` if it is already connected, otherwise connect."""
-    if wiki is not None:
-        return wiki
-
+def connect(remote_name, remote_url):
+    """Connect to ``remote_url``, logging in if the remote is configured for it."""
     wiki_login = git_config(f'remote.{remote_name}.mwLogin')
     wiki_password = git_config(f'remote.{remote_name}.mwPassword')
     wiki_domain = git_config(f'remote.{remote_name}.mwDomain')

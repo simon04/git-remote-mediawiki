@@ -30,7 +30,7 @@ from git_mediawiki import (
     HTTP_CODE_PAGE_NOT_FOUND,
     WIKI_ERRORS,
     clean_filename,
-    connect_maybe,
+    connect,
     git_config,
     run_git,
     warn,
@@ -277,7 +277,7 @@ def preview(args):
     v_print(f'selected remote:\n\tname: {remote_name}\n\turl: {remote_url}\n')
 
     try:
-        wiki = connect_maybe(None, remote_name, remote_url)
+        wiki = connect(remote_name, remote_url)
     except WIKI_ERRORS as error:
         raise SystemExit(f'Could not connect to {remote_url}: {error}') from error
 
