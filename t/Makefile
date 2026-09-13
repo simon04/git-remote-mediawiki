@@ -9,15 +9,19 @@
 ## Test git-remote-mediawiki
 
 # The default target of this Makefile is...
-all:: test
+all:: unittest
 
 T = $(wildcard t[0-9][0-9][0-9][0-9]-*.sh)
 
-.PHONY: help test clean all
+.PHONY: help unittest test clean all
 
 help:
-	@echo 'Run "$(MAKE) test" to launch test scripts'
+	@echo 'Run "$(MAKE) unittest" for the Python tests, which need no wiki'
+	@echo 'Run "$(MAKE) test" for the shell tests, which need a local wiki'
 	@echo 'Run "$(MAKE) clean" to remove trash folders'
+
+unittest:
+	python3 -m unittest discover --start-directory . --verbose
 
 test:
 	@for t in $(T); do \

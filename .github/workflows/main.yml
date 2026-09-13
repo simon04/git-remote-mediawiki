@@ -20,7 +20,9 @@ jobs:
       - name: Format
         run: uv run ruff format --check .
       - name: Type check
-        run: uv run ty check --extra-search-path .
+        run: uv run ty check --extra-search-path . --extra-search-path t
+      - name: Test
+        run: python3 -m unittest discover --start-directory t --verbose
       - name: Shell syntax
         # sh -n takes one script; the rest would be its arguments, not checked.
         run: for f in bin-wrapper/git t/*.sh; do sh -n "$f" || exit 1; done

@@ -44,4 +44,12 @@ python-version = "3.14"
 # file either, so name every file. git_mediawiki.py is reached through
 # --extra-search-path: ty gives a PEP 723 script an isolated environment, and
 # neither environment.extra-paths nor environment.root applies to one.
-include = ["git_mediawiki.py", "git-remote-mediawiki", "git-mw", "t/test-gitmw.py"]
+include = [
+    "git_mediawiki.py",
+    "git-remote-mediawiki",
+    "git-mw",
+    "t/test-gitmw.py",
+    "t/fakewiki.py",
+    "t/gitmwtest.py",
+    "t/test_continuing_queries.py",
+]

@@ -52,14 +52,16 @@ bin-wrapper/git mw preview Some_page.mw
 # Lint, format and type-check with the versions pinned in uv.lock
 uv run ruff check .
 uv run ruff format .          # --check to verify without rewriting, as CI does
-uv run ty check --extra-search-path .
+uv run ty check --extra-search-path . --extra-search-path t
 
-# Set up a local MediaWiki to test against (once), see t/README for details
+# Run the tests. These need no wiki: they drive the real scripts against an
+# in-process stand-in for one, in t/fakewiki.py
+python3 -m unittest discover --start-directory t --verbose
+
+# The shell tests that have not been ported yet need a local MediaWiki,
+# see t/README for how to install one
 (cd t && ./install-wiki.sh install)
-
-# Run the whole test suite, or a single test (both from within t/)
 make -C t test
-(cd t && ./t9360-mw-to-git-clone.sh --verbose)
 ```
 
 ## What changed in this fork
