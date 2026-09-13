@@ -17,11 +17,11 @@ import logging
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import NoReturn
+from typing import Any
 from urllib.parse import urljoin
 
 # Allow the sibling git_mediawiki module to be imported even when this script
@@ -277,9 +277,6 @@ def read_file_content(file_name: str) -> tuple[str, str]:
 
 
 def preview(args: argparse.Namespace) -> None:
-    if not args.file:
-        raise SystemExit('Missing file argument, see `git mw help`')
-
     logger.debug('### Selecting remote')
     remote_name, remote_url = select_remote(args.remote)
     logger.debug('selected remote:\n\tname: %s\n\turl: %s', remote_name, remote_url)
@@ -319,16 +316,11 @@ def preview(args: argparse.Namespace) -> None:
         logger.info('Preview file saved as: %s', preview_file_name)
 
 
-############################### Help Functions ################################
+#################################### Main #####################################
 
 
-PREVIEW_HELP = """\
-USAGE: git mw preview [--remote|-r <remote name>] [--autoload|-a]
-                      [--output|-o <output filename>] [--verbose|-v]
-                      <blob> | <filename>
-
-DESCRIPTION:
-Preview is an utiliy to preview local content of a mediawiki repo as if it was
+PREVIEW_DESCRIPTION = """\
+Preview is a utility to preview local content of a mediawiki repo as if it was
 pushed on the remote.
 
 For that, preview searches for the remote name of the current branch's
@@ -344,57 +336,72 @@ by the remote mediawiki and combined with a template retrieved from
 the mediawiki.
 
 Finally, preview will save the HTML result in a file. and autoload it
-in your default web browser if the option --autoload is present.
-
-OPTIONS:
-    -r <remote name>, --remote <remote name>
-        If the remote is a mediawiki, the template and the parse engine
-        used for the preview will be those of that remote.
-        If not, a list of valid remotes will be shown.
-
-    -a, --autoload
-        Try to load the HTML output in a new tab (or new window) of your
-        default web browser.
-
-    -o <output filename>, --output <output filename>
-        Change the HTML output filename. Default filename is based on the
-        input filename with its extension replaced by '.html'.
-
-    -v, --verbose
-        Show more information on what's going on under the hood.
+in your default web browser if the option --autoload is present.\
 """
 
-HELP = """\
-usage: git mw <command> <args>
-
-git mw commands are:
-    help        Display help information about git mw
-    preview     Parse and render local file into HTML
-"""
+VERBOSE_HELP = "show more information on what's going on under the hood"
 
 
-def help_command(_args: argparse.Namespace | None = None) -> NoReturn:
-    print(HELP, end='')
-    raise SystemExit(0)
+def build_parser() -> argparse.ArgumentParser:
+    """Build the ``git mw`` parser, with one subparser per command."""
+    parser = argparse.ArgumentParser(
+        prog='git mw',
+        description='Set of tools for a git repo with a mediawiki remote.',
+    )
+    parser.add_argument('-v', '--verbose', action='store_true', help=VERBOSE_HELP)
+    commands = parser.add_subparsers(dest='command', metavar='<command>')
 
+    def add(name: str, summary: str, **kwargs: Any) -> argparse.ArgumentParser:
+        kwargs.setdefault('description', summary)
+        command = commands.add_parser(name, help=summary, **kwargs)
+        # Accept -v after the command as well as before it. SUPPRESS stops the
+        # subparser overwriting a -v that was given before the command.
+        command.add_argument(
+            '-v',
+            '--verbose',
+            action='store_true',
+            default=argparse.SUPPRESS,
+            help=VERBOSE_HELP,
+        )
+        return command
 
-def preview_help() -> NoReturn:
-    print(PREVIEW_HELP, end='')
-    raise SystemExit(0)
+    add('help', 'display help information about git mw')
 
-
-#################################### Main #####################################
-
-
-def build_parser(command: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f'git mw {command}', add_help=False)
-    parser.add_argument('-h', '--help', action='store_true')
-    parser.add_argument('-v', '--verbose', action='store_true')
-    if command == 'preview':
-        parser.add_argument('file', nargs='?', default='')
-        parser.add_argument('-o', '--output', default='')
-        parser.add_argument('-r', '--remote', default='')
-        parser.add_argument('-a', '--autoload', action='store_true')
+    preview_parser = add(
+        'preview',
+        'parse and render local file into HTML',
+        description=PREVIEW_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    preview_parser.add_argument(
+        'file',
+        metavar='<file>',
+        help='file to preview; if there is no such file in the current '
+        'directory it is taken to be a blob',
+    )
+    preview_parser.add_argument(
+        '-r',
+        '--remote',
+        default='',
+        metavar='<remote>',
+        help='preview against this remote. The template and the parse engine '
+        "used will be that remote's. If it is not a mediawiki, a list of "
+        'valid remotes is shown',
+    )
+    preview_parser.add_argument(
+        '-a',
+        '--autoload',
+        action='store_true',
+        help='try to load the HTML output in a new tab (or new window) of your default web browser',
+    )
+    preview_parser.add_argument(
+        '-o',
+        '--output',
+        default='',
+        metavar='<file>',
+        help='write the HTML here. Defaults to the input filename with its '
+        "extension replaced by '.html'",
+    )
     return parser
 
 
@@ -407,31 +414,16 @@ def main(argv: Sequence[str]) -> None:
     sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
     sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
 
-    commands: dict[str, Callable[[argparse.Namespace], None]] = {
-        'help': help_command,
-        'preview': preview,
-    }
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-    # Search for sub-command, wherever it appears on the command line.
-    argv = list(argv)
-    command = 'help'
-    for index, arg in enumerate(argv):
-        if arg in commands:
-            command = arg
-            del argv[index]
-            break
-
-    args = build_parser(command).parse_args(argv)
-    # Leave the root logger at INFO so that -v does not also switch on the
-    # debug output of urllib3 and friends; only our own traces are verbose.
     logging.basicConfig(format='%(message)s', level=logging.INFO)
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
-    if args.help:
-        preview_help() if command == 'preview' else help_command()
-
-    # Launch command
-    commands[command](args)
+    if args.command == 'preview':
+        preview(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == '__main__':
