@@ -13,8 +13,11 @@
 # Documentation & bugtracker: https://github.com/Git-Mediawiki/Git-Mediawiki
 
 import argparse
+import getpass
+import itertools
 import logging
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -36,6 +39,7 @@ from git_mediawiki import (
     clean_filename,
     connect,
     git_config,
+    git_credential,
     logger,
     run_git,
 )
@@ -316,6 +320,226 @@ def preview(args: argparse.Namespace) -> None:
         logger.info('Preview file saved as: %s', preview_file_name)
 
 
+################################ Setup wizard #################################
+
+
+def read_line(prompt: str) -> str:
+    """Read one answer, treating end of input or an interrupt as cancellation."""
+    try:
+        return input(prompt)
+    except EOFError, KeyboardInterrupt:
+        print()
+        raise SystemExit('Cancelled. Nothing was written.') from None
+
+
+def ask(question: str, default: str = '') -> str:
+    """Ask for a line of input, offering ``default`` if there is one."""
+    prompt = f'{question} [{default}]: ' if default else f'{question}: '
+    while True:
+        answer = read_line(prompt).strip()
+        if answer:
+            return answer
+        if default:
+            return default
+
+
+def ask_yes_no(question: str, default: bool) -> bool:
+    """Ask a yes or no question."""
+    prompt = f'{question} [{"Y/n" if default else "y/N"}]: '
+    while True:
+        answer = read_line(prompt).strip().lower()
+        if not answer:
+            return default
+        if answer in ('y', 'yes'):
+            return True
+        if answer in ('n', 'no'):
+            return False
+        print('Please answer yes or no.')
+
+
+def ask_choice(question: str, options: Sequence[tuple[str, str]]) -> str:
+    """Ask the user to pick one of ``options``, each a (value, label) pair."""
+    print(question)
+    for number, (_, label) in enumerate(options, start=1):
+        print(f'  {number}. {label}')
+    while True:
+        answer = read_line(f'Choice [1-{len(options)}]: ').strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return options[int(answer) - 1][0]
+        print(f'Please enter a number between 1 and {len(options)}.')
+
+
+def wiki_url_candidates(url: str) -> list[str]:
+    """The address as typed, then the usual ways of getting it slightly wrong.
+
+    The address wanted is the one holding api.php, which on Wikipedia is /w
+    while articles are served from /wiki.
+    """
+    url = url.rstrip('/')
+    candidates = [url]
+    if url.endswith('/wiki'):
+        candidates.append(f'{url.removesuffix("/wiki")}/w')
+    candidates.append(f'{url}/w')
+    return list(dict.fromkeys(candidates))
+
+
+def ask_wiki() -> tuple[MediaWiki, str]:
+    """Ask for a wiki address until one of them answers."""
+    while True:
+        typed = ask('Address of the wiki', 'https://en.wikipedia.org/w')
+        for url in wiki_url_candidates(typed):
+            try:
+                wiki = MediaWiki(url)
+            except WIKI_ERRORS as error:
+                print(f'  {url}/api.php did not answer: {error}')
+                continue
+            if url != typed:
+                print(f'  using {url}, which is where api.php lives')
+            name = wiki.info.get('sitename', url)
+            print(f'  connected to {name}, {wiki.info.get("generator", "MediaWiki")}')
+            return wiki, url
+
+
+def ask_pages(wiki: MediaWiki) -> str:
+    """Ask for page titles and check them against the wiki."""
+    print('Write a space in a title as an underscore, as the config does.')
+    while True:
+        titles = ask('Page titles, separated by spaces').split()
+        query = wiki.query(titles='|'.join(titles)).get('query', {})
+        for renamed in query.get('normalized', []):
+            print(f'  {renamed["from"]} is the page "{renamed["to"]}"')
+        missing = [
+            page['title'] for page_id, page in query.get('pages', {}).items() if int(page_id) < 0
+        ]
+        for title in missing:
+            print(f'  there is no page "{title}"')
+        if not missing or ask_yes_no('Track them anyway?', default=False):
+            return ' '.join(titles)
+
+
+def ask_category(wiki: MediaWiki) -> str:
+    """Ask for a category and check that it has members."""
+    while True:
+        name = ask('Category, without the "Category:" prefix')
+        result = wiki.query(list='categorymembers', cmtitle=f'Category:{name}', cmlimit=50)
+        members = result.get('query', {}).get('categorymembers', [])
+        if not members:
+            print(f'  Category:{name} has no pages')
+            continue
+        print(f'  {len(members)}{" or more" if "continue" in result else ""} pages:')
+        for page in members[:5]:
+            print(f'    {page["title"]}')
+        return name.replace(' ', '_')
+
+
+def ask_namespace(wiki: MediaWiki) -> str:
+    """Offer the wiki's own namespaces and ask for one."""
+    namespaces = wiki.query(meta='siteinfo', siprop='namespaces')['query']['namespaces']
+    options = []
+    for namespace in sorted(namespaces.values(), key=lambda ns: ns['id']):
+        if namespace['id'] < 0:
+            continue  # Special and Media are virtual; allpages cannot list them
+        # The main namespace has no canonical name; the config calls it (Main).
+        canonical = namespace.get('canonical') or '(Main)'
+        local = namespace.get('*') or '(Main)'
+        label = canonical if local == canonical else f'{canonical} ({local})'
+        options.append((canonical.replace(' ', '_'), label))
+    return ask_choice('Which namespace?', options)
+
+
+def ask_login(wiki: MediaWiki, url: str) -> str:
+    """Ask for a bot password, check it, and hand it to git credential."""
+    print()
+    print('Pushing needs an account. Wikimedia wikis, Wikipedia among them, do')
+    print('not accept a main-account password here and want a bot password:')
+    print(f'  {url}/index.php?title=Special:BotPasswords')
+    print('Grant it at least "Edit existing pages".')
+    while True:
+        login = ask('Login name, of the form YourName@labelyoupicked')
+        try:
+            password = getpass.getpass('Password (not echoed): ')
+        except EOFError, KeyboardInterrupt:
+            print()
+            raise SystemExit('Cancelled. Nothing was written.') from None
+        try:
+            wiki.login(login, password)
+        except WIKI_ERRORS as error:
+            print(f'  the wiki refused that login: {error}')
+            if not ask_yes_no('Try again?', default=True):
+                return ''
+            continue
+        print(f'  logged in as {wiki.site.username}')
+        git_credential({'url': url, 'username': login, 'password': password}, 'approve')
+        print('  password handed to git credential, so it is asked for once only')
+        return login
+
+
+def setup(args: argparse.Namespace) -> None:
+    """Walk the user through cloning part of a wiki."""
+    print('This asks a few questions, checks the answers against the wiki, and')
+    print('then runs the git clone they describe. Nothing is written until the')
+    print('command is shown and confirmed.')
+    print()
+
+    wiki, url = ask_wiki()
+    config: dict[str, str] = {}
+
+    print()
+    tracking = ask_choice(
+        'Which pages should the repository track?',
+        [
+            ('pages', 'Named pages'),
+            ('categories', 'Every page in a category'),
+            ('namespaces', 'Every page in a namespace'),
+            ('all', 'The whole wiki, which on a large one is a great many pages'),
+        ],
+    )
+    if tracking == 'pages':
+        config['pages'] = ask_pages(wiki)
+    elif tracking == 'categories':
+        config['categories'] = ask_category(wiki)
+    elif tracking == 'namespaces':
+        config['namespaces'] = ask_namespace(wiki)
+
+    print()
+    if ask_yes_no('Will you push changes back to the wiki?', default=False):
+        login = ask_login(wiki, url)
+        if login:
+            config['mwLogin'] = login
+    else:
+        # Otherwise every non-.mw file committed is attempted as an upload.
+        config['mediaexport'] = 'false'
+
+    print()
+    if ask_yes_no('Import media files used by those pages?', default=False):
+        config['mediaimport'] = 'true'
+
+    print()
+    directory = ask('Directory to create', slugify(wiki.info.get('sitename', '')))
+    command = [
+        'git',
+        'clone',
+        *itertools.chain.from_iterable(
+            ('-c', f'remote.origin.{name}={value}') for name, value in config.items()
+        ),
+        f'mediawiki::{url}',
+        directory,
+    ]
+    print()
+    print('About to run:')
+    print(f'  {shlex.join(command)}')
+    print()
+    if not ask_yes_no('Run it now?', default=True):
+        print('Nothing was written. The command above does it when you are ready.')
+        return
+    raise SystemExit(subprocess.run(command, check=False).returncode)
+
+
+def slugify(name: str) -> str:
+    """Turn a wiki's name into something usable as a directory name."""
+    return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'wiki'
+
+
 #################################### Main #####################################
 
 
@@ -337,6 +561,17 @@ the mediawiki.
 
 Finally, preview will save the HTML result in a file. and autoload it
 in your default web browser if the option --autoload is present.\
+"""
+
+SETUP_DESCRIPTION = """\
+Setup asks where the wiki is, what of it you want, and whether you intend to
+push, and then runs the git clone that follows from the answers.
+
+Every answer is checked against the wiki itself: that the address is the one
+holding api.php, that the pages and categories named exist, that a login is
+accepted. The namespaces on offer are the ones the wiki reports.
+
+Nothing is written until the clone command is printed and confirmed.\
 """
 
 VERBOSE_HELP = "show more information on what's going on under the hood"
@@ -366,6 +601,13 @@ def build_parser() -> argparse.ArgumentParser:
         return command
 
     add('help', 'display help information about git mw')
+
+    add(
+        'setup',
+        'set up a repository for a wiki, asking questions',
+        description=SETUP_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
 
     preview_parser = add(
         'preview',
@@ -422,6 +664,8 @@ def main(argv: Sequence[str]) -> None:
 
     if args.command == 'preview':
         preview(args)
+    elif args.command == 'setup':
+        setup(args)
     else:
         parser.print_help()
 

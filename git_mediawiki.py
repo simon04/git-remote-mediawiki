@@ -195,6 +195,11 @@ class MediaWiki:
         """The underlying HTTP session, shared with the API calls."""
         return self.site.connection
 
+    @property
+    def info(self) -> ApiResult:
+        """The wiki's ``siteinfo`` general block, fetched when connecting."""
+        return self.site.site
+
     def api(self, action: str, **params: Any) -> ApiResult:
         """Perform an API call and return the decoded JSON response."""
         return self.site.api(action, **params)

@@ -29,6 +29,7 @@ See the [User manual](docs/User-manual.md) for the other installation options.
 ## Usage
 
 ```shell
+git mw setup                  # asks what you want and clones it
 git clone mediawiki::http://example.com/wiki/
 git mw preview Some_page.mw
 ```

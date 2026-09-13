@@ -8,6 +8,20 @@ Everything below was checked against `en.wikipedia.org`, running MediaWiki
 1.47.0-wmf.19 at the time of writing. Other Wikimedia wikis behave the same way;
 other language editions differ only in their hostname.
 
+## The short way: `git mw setup`
+
+`git mw setup` asks the questions this page answers, checks each answer against
+the wiki, and then runs the `git clone` that follows from them. It prints that
+command and waits for confirmation before running it, so it is also a way of
+finding out what to type.
+
+```shell
+git mw setup
+```
+
+It needs a terminal, since it prompts. Everything it does can be done by hand
+with the rest of this page.
+
 ## The URL
 
 The remote URL is `mediawiki::` followed by the address holding `api.php`. For
