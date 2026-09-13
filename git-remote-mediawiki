@@ -16,6 +16,7 @@
 # Documentation & bugtracker: https://github.com/Git-Mediawiki/Git-Mediawiki
 
 import argparse
+import itertools
 import re
 import sys
 from datetime import UTC, datetime, timedelta
@@ -271,8 +272,8 @@ class GitRemoteMediaWiki:
     def get_mw_page_list(self, page_list):
         """Return the named pages, queried in slices, keyed by title."""
         pages = {}
-        for start in range(0, len(page_list), SLICE_SIZE):
-            pages |= self.get_mw_first_pages(page_list[start : start + SLICE_SIZE])
+        for chunk in itertools.batched(page_list, SLICE_SIZE, strict=False):
+            pages |= self.get_mw_first_pages(chunk)
         return pages
 
     def get_mw_tracked_categories(self):
@@ -402,9 +403,9 @@ class GitRemoteMediaWiki:
         titles = [page['title'] for page in pages.values()]
         mediafiles = {}
 
-        for start in range(0, len(titles), BATCH_SIZE):
+        for batch in itertools.batched(titles, BATCH_SIZE, strict=False):
             # pattern 'page1|page2|...' required by the API
-            mw_titles = '|'.join(titles[start : start + BATCH_SIZE])
+            mw_titles = '|'.join(batch)
 
             # Media files could be included or linked from a page, get all
             # related
@@ -774,8 +775,7 @@ class GitRemoteMediaWiki:
         n_actual = 0
         total = len(revision_ids)
 
-        for start in range(0, total, MAX_REVS):
-            page_rev_ids = revision_ids[start : start + MAX_REVS]
+        for page_rev_ids in itertools.batched(revision_ids, MAX_REVS, strict=False):
             # Count page even if we skip it, since we display n/total and
             # total includes skipped pages.
             n += len(page_rev_ids)
@@ -1076,9 +1076,7 @@ class GitRemoteMediaWiki:
             # for the revision
             commit_msg = run_git(['log', '--no-walk', '--format=%s', sha1_commit]).rstrip('\n')
             # Push every blob
-            for info, name in zip(
-                diff_info_list[::2], diff_info_list[1::2], strict=True
-            ):
+            for info, name in itertools.batched(diff_info_list, 2, strict=True):
                 mw_revision, status = self.mw_push_file(info, name, commit_msg, mw_revision)
                 if status == 'non-fast-forward':
                     # we may already have sent part of the commit to MediaWiki,
