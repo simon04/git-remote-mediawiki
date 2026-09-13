@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["mwclient>=0.11"]
+# dependencies = ["mwclient>=0.11", "requests"]
 # ///
 
 # Copyright (C) 2013
@@ -17,9 +17,11 @@ import logging
 import re
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urljoin
 
 # Allow the sibling git_mediawiki module to be imported even when this script
@@ -30,12 +32,18 @@ from git_mediawiki import (
     HTTP_CODE_OK,
     HTTP_CODE_PAGE_NOT_FOUND,
     WIKI_ERRORS,
+    MediaWiki,
     clean_filename,
     connect,
     git_config,
     logger,
     run_git,
 )
+
+# The attribute lists html.parser hands to the tag callbacks; a value is None
+# for a bare attribute such as <option selected>.
+type Attributes = list[tuple[str, str | None]]
+
 
 ############################# HTML manipulation ################################
 
@@ -61,25 +69,25 @@ class TemplateMerger(HTMLParser):
         }
     )
 
-    def __init__(self, content, content_id, base_url):
+    def __init__(self, content: str, content_id: str, base_url: str) -> None:
         super().__init__(convert_charrefs=False)
         self.content = content
         self.content_id = content_id
         self.base_url = base_url
-        self.pieces = []
+        self.pieces: list[str] = []
         self.found = False
-        self.skip_tag = None
+        self.skip_tag: str | None = None
         self.skip_depth = 0
 
-    def result(self):
+    def result(self) -> str:
         """Return the merged document."""
         return ''.join(self.pieces)
 
-    def _emit(self, text):
+    def _emit(self, text: str) -> None:
         if not self.skip_depth:
             self.pieces.append(text)
 
-    def _format_tag(self, tag, attrs, self_closing):
+    def _format_tag(self, tag: str, attrs: Attributes, self_closing: bool) -> str:
         parts = [tag]
         for name, value in attrs:
             if value is None:
@@ -90,7 +98,7 @@ class TemplateMerger(HTMLParser):
             parts.append(f'{name}="{escape(value, quote=True)}"')
         return '<{}{}>'.format(' '.join(parts), ' /' if self_closing else '')
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: Attributes) -> None:
         if self.skip_depth:
             if tag == self.skip_tag:
                 self.skip_depth += 1
@@ -103,7 +111,7 @@ class TemplateMerger(HTMLParser):
             self.skip_tag = tag
             self.skip_depth = 1
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if self.skip_depth:
             if tag != self.skip_tag:
                 return
@@ -113,32 +121,34 @@ class TemplateMerger(HTMLParser):
             self.skip_tag = None
         self.pieces.append(f'</{tag}>')
 
-    def handle_startendtag(self, tag, attrs):
+    def handle_startendtag(self, tag: str, attrs: Attributes) -> None:
         self._emit(self._format_tag(tag, attrs, True))
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         self._emit(data)
 
-    def handle_entityref(self, name):
+    def handle_entityref(self, name: str) -> None:
         self._emit(f'&{name};')
 
-    def handle_charref(self, name):
+    def handle_charref(self, name: str) -> None:
         self._emit(f'&#{name};')
 
-    def handle_comment(self, data):
+    def handle_comment(self, data: str) -> None:
         self._emit(f'<!--{data}-->')
 
-    def handle_decl(self, decl):
+    def handle_decl(self, decl: str) -> None:
         self._emit(f'<!{decl}>')
 
-    def handle_pi(self, data):
+    def handle_pi(self, data: str) -> None:
         self._emit(f'<?{data}>')
 
-    def unknown_decl(self, data):
+    def unknown_decl(self, data: str) -> None:
         self._emit(f'<![{data}]>')
 
 
-def merge_contents(template, content, remote_url, remote_name):
+def merge_contents(
+    template: str, content: str, remote_url: str, remote_name: str
+) -> str:
     """Insert ``content`` into ``template`` and absolutize its links."""
     template_content_id = (
         git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
@@ -165,11 +175,11 @@ def merge_contents(template, content, remote_url, remote_name):
 ############################### Git helpers ###################################
 
 
-def is_valid_remote(remote):
+def is_valid_remote(remote: str) -> bool:
     return remote in run_git(['remote']).split()
 
 
-def find_mediawiki_remotes():
+def find_mediawiki_remotes() -> list[str]:
     return [
         remote
         for remote in run_git(['remote']).split()
@@ -177,14 +187,14 @@ def find_mediawiki_remotes():
     ]
 
 
-def find_upstream_remote_name():
+def find_upstream_remote_name() -> str | None:
     current_branch = run_git(['symbolic-ref', '--short', 'HEAD'], quiet=True).strip()
     if not current_branch:
         return None
     return git_config(f'branch.{current_branch}.remote')
 
 
-def mediawiki_remote_url_maybe(remote):
+def mediawiki_remote_url_maybe(remote: str) -> str | None:
     """Return the wiki URL of ``remote``, or None if it is not a wiki."""
     remote_url = git_config(f'remote.{remote}.url')
     prefix = 'mediawiki::'
@@ -196,7 +206,7 @@ def mediawiki_remote_url_maybe(remote):
 ############################# Preview Functions ###############################
 
 
-def get_template(wiki, url, page_name):
+def get_template(wiki: MediaWiki, url: str, page_name: str) -> str:
     """Retrieve the HTML rendering of ``page_name``, used as a template."""
     response = wiki.session.get(f'{url}/index.php', params={'title': page_name})
     if response.status_code == HTTP_CODE_OK:
@@ -220,7 +230,7 @@ def get_template(wiki, url, page_name):
     return response.text
 
 
-def select_remote(remote_name):
+def select_remote(remote_name: str) -> tuple[str, str]:
     """Return the (name, url) of the mediawiki remote to preview against."""
     if remote_name:
         if not is_valid_remote(remote_name):
@@ -230,10 +240,10 @@ def select_remote(remote_name):
             raise SystemExit(f'{remote_name} is not a mediawiki remote')
         return remote_name, remote_url
 
-    remote_name = find_upstream_remote_name()
-    remote_url = mediawiki_remote_url_maybe(remote_name) if remote_name else None
-    if remote_url:
-        return remote_name, remote_url
+    upstream = find_upstream_remote_name()
+    remote_url = mediawiki_remote_url_maybe(upstream) if upstream else None
+    if upstream and remote_url:
+        return upstream, remote_url
 
     valid_remotes = find_mediawiki_remotes()
     if not valid_remotes:
@@ -249,7 +259,7 @@ def select_remote(remote_name):
     raise SystemExit(1)
 
 
-def read_file_content(file_name):
+def read_file_content(file_name: str) -> tuple[str, str]:
     """Return the content of ``file_name``, falling back to a Git blob."""
     path = Path(file_name)
     if path.exists():
@@ -262,7 +272,7 @@ def read_file_content(file_name):
     return file_content, file_name
 
 
-def preview(args):
+def preview(args: argparse.Namespace) -> None:
     if not args.file:
         raise SystemExit('Missing file argument, see `git mw help`')
 
@@ -359,12 +369,12 @@ git mw commands are:
 """
 
 
-def help_command(_args=None):
+def help_command(_args: argparse.Namespace | None = None) -> NoReturn:
     print(HELP, end='')
     raise SystemExit(0)
 
 
-def preview_help():
+def preview_help() -> NoReturn:
     print(PREVIEW_HELP, end='')
     raise SystemExit(0)
 
@@ -372,7 +382,7 @@ def preview_help():
 #################################### Main #####################################
 
 
-def build_parser(command):
+def build_parser(command: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=f'git mw {command}', add_help=False)
     parser.add_argument('-h', '--help', action='store_true')
     parser.add_argument('-v', '--verbose', action='store_true')
@@ -384,14 +394,19 @@ def build_parser(command):
     return parser
 
 
-def main(argv):
+def main(argv: Sequence[str]) -> None:
     # By default, use UTF-8 to communicate with Git and the user. The error
     # handlers are explicit because reconfigure() resets them to 'strict', and
     # a diagnostic must never be able to abort the command.
-    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    # The ignores below are for typeshed, which types sys.std* as TextIO; the
+    # objects CPython puts there are TextIOWrappers, which do have reconfigure.
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # type: ignore[union-attr]
 
-    commands = {'help': help_command, 'preview': preview}
+    commands: dict[str, Callable[[argparse.Namespace], None]] = {
+        'help': help_command,
+        'preview': preview,
+    }
 
     # Search for sub-command, wherever it appears on the command line.
     argv = list(argv)

@@ -32,7 +32,9 @@ import argparse
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, NoReturn
 from urllib.parse import urlsplit
 
 import mwclient
@@ -40,12 +42,12 @@ import mwclient
 SLASH_REPLACEMENT = '%2F'
 
 
-def die(message):
+def die(message: str) -> NoReturn:
     print(message, file=sys.stderr)
     raise SystemExit(1)
 
 
-def read_config(path):
+def read_config(path: Path) -> dict[str, str]:
     """Parse the shell-style test.config file.
 
     Parsing stops as soon as the variables the wiki address is built from are
@@ -69,7 +71,7 @@ WIKI_ADDRESS = f'http://{CONFIG["SERVER_ADDR"]}:{CONFIG["PORT"]}'
 WIKI_URL = f'{WIKI_ADDRESS}/{CONFIG["WIKI_DIR_NAME"]}'
 
 
-def connect():
+def connect() -> mwclient.Site:
     """Log the admin user in and return the wiki."""
     parts = urlsplit(WIKI_URL)
     site = mwclient.Site(
@@ -82,7 +84,9 @@ def connect():
     return site
 
 
-def query_list(site, list_name, **params):
+def query_list(
+    site: mwclient.Site, list_name: str, **params: Any
+) -> list[dict[str, Any]]:
     """Run a list query, following every continuation."""
     params = {'list': list_name, **params}
     items = []
@@ -95,7 +99,7 @@ def query_list(site, list_name, **params):
         params.update(continuation)
 
 
-def wiki_getpage(site, args):
+def wiki_getpage(site: mwclient.Site, args: argparse.Namespace) -> None:
     """Fetch a page from the wiki and copy its content into a directory."""
     page = site.pages[args.pagename]
     if not page.exists:
@@ -107,7 +111,7 @@ def wiki_getpage(site, args):
     destination.write_text(page.text(), encoding='utf-8')
 
 
-def wiki_delete_page(site, args):
+def wiki_delete_page(site: mwclient.Site, args: argparse.Namespace) -> None:
     """Delete the page with the given name from the wiki."""
     page = site.pages[args.pagename]
     if not page.exists:
@@ -115,7 +119,7 @@ def wiki_delete_page(site, args):
     page.delete()
 
 
-def wiki_editpage(site, args):
+def wiki_editpage(site: mwclient.Site, args: argparse.Namespace) -> None:
     """Create or edit a page.
 
     If <wiki_append> is 'true', <wiki_content> is appended to the current
@@ -134,7 +138,7 @@ def wiki_editpage(site, args):
     page.save(text, summary=args.summary or '')
 
 
-def wiki_getallpagename(site, args):
+def wiki_getallpagename(site: mwclient.Site, args: argparse.Namespace) -> None:
     """Write the name of every page of the wiki into all.txt.
 
     If <category> is given, only the pages belonging to it are listed.
@@ -155,7 +159,7 @@ def wiki_getallpagename(site, args):
     )
 
 
-def wiki_upload_file(site, args):
+def wiki_upload_file(site: mwclient.Site, args: argparse.Namespace) -> None:
     """Upload a file to the wiki."""
     with open(args.file_name, 'rb') as handle:
         site.upload(
@@ -167,7 +171,7 @@ def wiki_upload_file(site, args):
         )
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='test-gitmw.py')
     commands = parser.add_subparsers(dest='command', required=True)
 
@@ -199,9 +203,9 @@ def build_parser():
     return parser
 
 
-def normalize(argv):
+def normalize(argv: Sequence[str]) -> list[str]:
     """Accept the ``-s=value`` form the shell tests use, like Getopt::Long."""
-    normalized = []
+    normalized: list[str] = []
     for arg in argv:
         match = re.fullmatch(r'(-[sc])=(.*)', arg, re.DOTALL)
         if match:
@@ -211,8 +215,8 @@ def normalize(argv):
     return normalized
 
 
-def main(argv):
-    sys.stderr.reconfigure(encoding='utf-8')
+def main(argv: Sequence[str]) -> None:
+    sys.stderr.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
     args = build_parser().parse_args(normalize(argv))
     args.function(connect(), args)
 
