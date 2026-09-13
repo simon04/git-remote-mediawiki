@@ -216,7 +216,7 @@ def normalize(argv: Sequence[str]) -> list[str]:
 
 
 def main(argv: Sequence[str]) -> None:
-    sys.stderr.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding='utf-8')  # ty: ignore[unresolved-attribute]
     args = build_parser().parse_args(normalize(argv))
     args.function(connect(), args)
 

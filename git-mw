@@ -398,10 +398,10 @@ def main(argv: Sequence[str]) -> None:
     # By default, use UTF-8 to communicate with Git and the user. The error
     # handlers are explicit because reconfigure() resets them to 'strict', and
     # a diagnostic must never be able to abort the command.
-    # The ignores below are for typeshed, which types sys.std* as TextIO; the
+    # The suppressions are for typeshed, which types sys.std* as TextIO; the
     # objects CPython puts there are TextIOWrappers, which do have reconfigure.
-    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')  # type: ignore[union-attr]
-    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # type: ignore[union-attr]
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
 
     commands: dict[str, Callable[[argparse.Namespace], None]] = {
         'help': help_command,

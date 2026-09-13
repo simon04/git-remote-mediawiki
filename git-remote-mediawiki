@@ -1270,16 +1270,16 @@ def main(argv: Sequence[str]) -> None:
     # error handlers explicitly, because reconfigure() resets them to 'strict':
     # a ref name is an arbitrary byte string, which surrogateescape round-trips
     # back to git intact, and a diagnostic must never be able to abort a push.
-    # The type: ignore comments are for typeshed, which types sys.std* as
-    # TextIO; the objects CPython actually puts there are TextIOWrappers, which
-    # do have reconfigure().
-    sys.stdin.reconfigure(encoding='utf-8', errors='surrogateescape')  # type: ignore[union-attr]
-    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # type: ignore[union-attr]
+    # The suppressions are for typeshed, which types sys.std* as TextIO; the
+    # objects CPython actually puts there are TextIOWrappers, which do have
+    # reconfigure().
+    sys.stdin.reconfigure(encoding='utf-8', errors='surrogateescape')  # ty: ignore[unresolved-attribute]
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
     # stdout carries the fast-import stream: pin it to UTF-8 with LF endings
     # whatever the locale and platform say, since the byte counts written by
     # literal_data() have to match. write_through keeps this text layer from
     # buffering ahead of the raw bytes literal_data() writes underneath it.
-    sys.stdout.reconfigure(  # type: ignore[union-attr]
+    sys.stdout.reconfigure(  # ty: ignore[unresolved-attribute]
         encoding='utf-8', errors='strict', newline='\n', write_through=True
     )
 

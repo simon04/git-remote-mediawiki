@@ -15,10 +15,12 @@ extend-select = ["E", "W", "I", "UP", "B", "C4", "FURB", "RUF"]
 [tool.ruff.format]
 quote-style = "single"
 
-[tool.mypy]
-python_version = "3.14"
-files = ["git_mediawiki.py", "git-remote-mediawiki", "git-mw", "t/test-gitmw.py"]
-# Both executables would otherwise be module "__main__" and collide.
-scripts_are_modules = true
-# mwclient ships no type information.
-ignore_missing_imports = true
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+# ty only discovers *.py on its own, and globs do not match an extensionless
+# file either, so name every file. git_mediawiki.py is reached through
+# --extra-search-path: ty gives a PEP 723 script an isolated environment, and
+# neither environment.extra-paths nor environment.root applies to one.
+include = ["git_mediawiki.py", "git-remote-mediawiki", "git-mw", "t/test-gitmw.py"]
