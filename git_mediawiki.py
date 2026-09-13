@@ -48,6 +48,7 @@ __all__ = [
     'git_credential',
     'revision_content',
     'run_git',
+    'run_git_bytes',
     'smudge_filename',
     'warn',
 ]
@@ -60,22 +61,23 @@ warn = functools.partial(print, file=sys.stderr)
 ############################### Git helpers ###################################
 
 
-def run_git(args, raw=False, quiet=False):
-    """Run ``git`` with ``args`` and return its standard output.
+def run_git_bytes(args, *, quiet=False):
+    """Run ``git`` with ``args`` and return its standard output as bytes.
 
-    The output is decoded as UTF-8 unless ``raw`` is set, in which case the
-    raw bytes are returned. Like the Perl version, a non-zero exit status is
-    not an error: callers inspect the (possibly empty) output instead.
+    A non-zero exit status is not an error: callers inspect the (possibly
+    empty) output instead. ``quiet`` discards git's own diagnostics.
     """
-    process = subprocess.run(
+    return subprocess.run(
         ['git', *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL if quiet else None,
         check=False,
-    )
-    if raw:
-        return process.stdout
-    return process.stdout.decode('utf-8', 'replace')
+    ).stdout
+
+
+def run_git(args, *, quiet=False):
+    """Run ``git`` with ``args`` and return its standard output as text."""
+    return run_git_bytes(args, quiet=quiet).decode('utf-8', 'replace')
 
 
 def git_config(name, boolean=False):

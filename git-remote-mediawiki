@@ -38,6 +38,7 @@ from git_mediawiki import (
     git_config_bool,
     revision_content,
     run_git,
+    run_git_bytes,
     smudge_filename,
     warn,
 )
@@ -882,7 +883,7 @@ class GitRemoteMediaWiki:
                 raise SystemExit(1) from error
             return newrevid
 
-        content = run_git(['cat-file', 'blob', new_sha1], raw=True)
+        content = run_git_bytes(['cat-file', 'blob', new_sha1])
         if not content:
             warn(f'Empty file {complete_file_name} not pushed.')
             return newrevid
