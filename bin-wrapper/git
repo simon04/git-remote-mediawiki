@@ -13,15 +13,17 @@ import shutil
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPOSITORY = HERE.parent
+#: This script's own directory, skipped when looking for the real git.
+WRAPPER_DIR = Path(__file__).resolve().parent
+#: Holds git-remote-mediawiki and git-mw, and is what goes on PATH.
+REPO_ROOT = WRAPPER_DIR.parent
 
 
 def real_git() -> str:
     """The git to hand over to.
 
-    Anything in this directory is skipped, since what is in it is this script,
-    and finding ourselves would mean running in a circle.
+    WRAPPER_DIR is skipped: what is in it is this script, and finding
+    ourselves would mean running in a circle.
     """
     exec_path = os.environ.get('GIT_EXEC_PATH')
     if exec_path:
@@ -30,7 +32,7 @@ def real_git() -> str:
     elsewhere = os.pathsep.join(
         directory
         for directory in os.environ.get('PATH', '').split(os.pathsep)
-        if directory and Path(directory).resolve() != HERE
+        if directory and Path(directory).resolve() != WRAPPER_DIR
     )
     found = shutil.which('git', path=elsewhere)
     if found is None:
@@ -41,7 +43,7 @@ def real_git() -> str:
 def main(argv: list[str]) -> None:
     environment = dict(os.environ)
     path = environment.get('PATH', '')
-    environment['PATH'] = f'{REPOSITORY}{os.pathsep}{path}' if path else str(REPOSITORY)
+    environment['PATH'] = f'{REPO_ROOT}{os.pathsep}{path}' if path else str(REPO_ROOT)
     # exec rather than run: this process has nothing left to do, and git should
     # own the terminal and report its own exit status.
     os.execve(real_git(), ['git', *argv], environment)

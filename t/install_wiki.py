@@ -21,7 +21,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+#: This directory, which is where the wiki and its database end up.
+TEST_DIR = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
@@ -42,8 +43,8 @@ class Settings:
     #: Which MediaWiki to fetch. See https://www.mediawiki.org/wiki/Download.
     version: str = '1.34.2'
     #: Directories, relative to this one.
-    web: Path = HERE / 'WEB'
-    files: Path = HERE / 'mediawiki'
+    web: Path = TEST_DIR / 'WEB'
+    files: Path = TEST_DIR / 'mediawiki'
 
     @property
     def base_url(self) -> str:
