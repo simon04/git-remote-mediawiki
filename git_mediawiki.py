@@ -34,7 +34,6 @@ NAME_MAX = 255
 WIKI_ERRORS = (MwClientError, OSError)
 
 __all__ = [
-    'EMPTY',
     'HTTP_CODE_OK',
     'HTTP_CODE_PAGE_NOT_FOUND',
     'VERSION',
@@ -43,7 +42,6 @@ __all__ = [
     'MediaWiki',
     'clean_filename',
     'connect_maybe',
-    'die',
     'git_config',
     'git_config_all',
     'git_config_bool',
@@ -54,18 +52,9 @@ __all__ = [
     'warn',
 ]
 
-# Used to test for empty strings
-EMPTY = ''
-
 # Progress reports and diagnostics go to stderr, where Git relays them to
 # the user without mixing them into the fast-import stream.
 warn = functools.partial(print, file=sys.stderr)
-
-
-def die(message):
-    """Print ``message`` on stderr and exit, the way Perl's ``die`` did."""
-    warn(message.rstrip('\n'))
-    raise SystemExit(1)
 
 
 ############################### Git helpers ###################################

@@ -26,13 +26,11 @@ from urllib.parse import urljoin
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from git_mediawiki import (
-    EMPTY,
     HTTP_CODE_OK,
     HTTP_CODE_PAGE_NOT_FOUND,
     WIKI_ERRORS,
     clean_filename,
     connect_maybe,
-    die,
     git_config,
     run_git,
     warn,
@@ -215,7 +213,7 @@ def get_template(wiki, url, page_name):
     code = response.status_code
     url_after = response.url  # resolve all redirections
     if code != HTTP_CODE_PAGE_NOT_FOUND:
-        die(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
+        raise SystemExit(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
 
     v_print(
         f"Warning: Failed to retrieve '{page_name}'. Create it on the mediawiki if you want\n"
@@ -225,18 +223,18 @@ def get_template(wiki, url, page_name):
     # requests automatically redirects GET requests
     response = wiki.session.get(f'{url}/index.php')
     if response.status_code != HTTP_CODE_OK:
-        die(f'Failed to get homepage @ {response.url} w/ code {code}')
+        raise SystemExit(f'Failed to get homepage @ {response.url} w/ code {code}')
     return response.text
 
 
 def select_remote(remote_name):
     """Return the (name, url) of the mediawiki remote to preview against."""
-    if remote_name != EMPTY:
+    if remote_name:
         if not is_valid_remote(remote_name):
-            die(f'{remote_name} is not a remote')
+            raise SystemExit(f'{remote_name} is not a remote')
         remote_url = mediawiki_remote_url_maybe(remote_name)
         if not remote_url:
-            die(f'{remote_name} is not a mediawiki remote')
+            raise SystemExit(f'{remote_name} is not a mediawiki remote')
         return remote_name, remote_url
 
     remote_name = find_upstream_remote_name()
@@ -271,8 +269,8 @@ def read_file_content(file_name):
 
 
 def preview(args):
-    if args.file == EMPTY:
-        die('Missing file argument, see `git mw help`')
+    if not args.file:
+        raise SystemExit('Missing file argument, see `git mw help`')
 
     v_print('### Selecting remote\n')
     remote_name, remote_url = select_remote(args.remote)
@@ -281,7 +279,7 @@ def preview(args):
     try:
         wiki = connect_maybe(None, remote_name, remote_url)
     except WIKI_ERRORS as error:
-        die(f'Could not connect to {remote_url}: {error}')
+        raise SystemExit(f'Could not connect to {remote_url}: {error}') from error
 
     file_content, file_name = read_file_content(args.file)
 
@@ -293,12 +291,12 @@ def preview(args):
     try:
         parsed = wiki.api('parse', text=file_content, title=wiki_page_name)
     except WIKI_ERRORS as error:
-        die(f'No response from remote mediawiki: {error}')
+        raise SystemExit(f'No response from remote mediawiki: {error}') from error
     new_content = parsed['parse']['text']['*']
 
     v_print('### Merging contents\n')
     preview_file_name = args.output
-    if preview_file_name == EMPTY:
+    if not preview_file_name:
         preview_file_name = re.sub(r'\.[^.]+$', '.html', file_name)
     Path(preview_file_name).write_text(
         merge_contents(template, new_content, remote_url, remote_name),
@@ -385,9 +383,9 @@ def build_parser(command):
     parser.add_argument('-h', '--help', action='store_true')
     parser.add_argument('-v', '--verbose', action='store_true')
     if command == 'preview':
-        parser.add_argument('file', nargs='?', default=EMPTY)
-        parser.add_argument('-o', '--output', default=EMPTY)
-        parser.add_argument('-r', '--remote', default=EMPTY)
+        parser.add_argument('file', nargs='?', default='')
+        parser.add_argument('-o', '--output', default='')
+        parser.add_argument('-r', '--remote', default='')
         parser.add_argument('-a', '--autoload', action='store_true')
     return parser
 

@@ -26,13 +26,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from git_mediawiki import (
-    EMPTY,
     HTTP_CODE_OK,
     WIKI_ERRORS,
     APIError,
     clean_filename,
     connect_maybe,
-    die,
     git_config,
     git_config_all,
     git_config_bool,
@@ -239,7 +237,7 @@ class GitRemoteMediaWiki:
         option = add('option', self.mw_option)
         option.add_argument('name')
         option.add_argument('value')
-        add('push', self.mw_push).add_argument('refspec', nargs='?', default=EMPTY)
+        add('push', self.mw_push).add_argument('refspec', nargs='?', default='')
 
         return parsers
 
@@ -258,7 +256,7 @@ class GitRemoteMediaWiki:
         try:
             args = vars(parser.parse_args(arguments))
         except CommandError as error:
-            die(f'Invalid "{command}" command: {error}')
+            raise SystemExit(f'Invalid "{command}" command: {error}') from error
 
         handler = args.pop('handler')
         handler(**args)
@@ -285,7 +283,7 @@ class GitRemoteMediaWiki:
                     'categorymembers', cmtitle=category, cmlimit='max'
                 )
             except WIKI_ERRORS as error:
-                die(str(error))
+                raise SystemExit(error) from error
             for page in mw_pages:
                 pages[page['title']] = page
 
@@ -304,7 +302,7 @@ class GitRemoteMediaWiki:
                     'allpages', apnamespace=namespace_id, aplimit='max'
                 )
             except WIKI_ERRORS as error:
-                die(str(error))
+                raise SystemExit(error) from error
             warn(f'{len(mw_pages)} found in namespace {local_namespace} ({namespace_id})')
             for page in mw_pages:
                 pages[page['title']] = page
@@ -536,7 +534,7 @@ class GitRemoteMediaWiki:
         # with a single \n. This function right trims a string and adds a \n at
         # the end to follow this rule.
         string = string.rstrip(' \t\n\r\f\v')
-        if string == EMPTY and page_created:
+        if not string and page_created:
             # Creating empty pages is forbidden.
             string = EMPTY_CONTENT
         return f'{string}\n'
@@ -545,7 +543,7 @@ class GitRemoteMediaWiki:
     def mediawiki_smudge(string):
         """Filter applied on MediaWiki data before adding them to Git."""
         if string == EMPTY_CONTENT:
-            string = EMPTY
+            string = ''
         # This \n is important. This is due to mediawiki's way to handle end of
         # files.
         return f'{string}\n'
@@ -680,7 +678,7 @@ class GitRemoteMediaWiki:
                 return refs
             match = re.match(rf'^{cmd} (.*)$', line.rstrip('\n'))
             if not match:
-                die(f"Invalid command in a '{cmd}' batch: {line.rstrip()}")
+                raise SystemExit(f"Invalid command in a '{cmd}' batch: {line.rstrip()}")
             refs.append(match.group(1))
 
     def mw_import(self, ref):
@@ -774,7 +772,9 @@ class GitRemoteMediaWiki:
                     revids=revs,
                 )
             except WIKI_ERRORS as error:
-                die(f'Failed to retrieve modified page for revision(s) {revs}: {error}')
+                raise SystemExit(
+                    f'Failed to retrieve modified page for revision(s) {revs}'
+                ) from error
 
             for result_page in result.get('query', {}).get('pages', {}).values():
                 n_actual = self.handle_result_page(
@@ -878,7 +878,7 @@ class GitRemoteMediaWiki:
         try:
             wiki.upload(complete_file_name, content, summary)
         except WIKI_ERRORS as error:
-            die(str(error))
+            raise SystemExit(error) from error
         last_file_page = wiki.get_page(path)
         newrevid = (last_file_page or {}).get('revid')
         warn(f'Pushed file: {new_sha1} - {complete_file_name}.')
@@ -894,7 +894,7 @@ class GitRemoteMediaWiki:
         newrevid = None
 
         if summary == EMPTY_MESSAGE:
-            summary = EMPTY
+            summary = ''
 
         new_sha1 = diff_info_split[3]
         old_sha1 = diff_info_split[2]
@@ -904,7 +904,7 @@ class GitRemoteMediaWiki:
 
         match = re.match(r'^(.*)\.([^.]*)$', complete_file_name)
         title = match.group(1) if match else None
-        extension = match.group(2) if match else EMPTY
+        extension = match.group(2) if match else ''
 
         if extension == 'mw':
             namespace_id = self.get_mw_namespace_id_for_page(complete_file_name)
@@ -939,8 +939,8 @@ class GitRemoteMediaWiki:
                 warn(f'Warning: Error {error} from mediawiki.')
                 return oldrevid, 'non-fast-forward'
             except WIKI_ERRORS as error:
-                # Other errors. Shouldn't happen => just die()
-                die(f'Fatal: Error {error} from mediawiki')
+                # Other errors. Shouldn't happen => just give up.
+                raise SystemExit(f'Fatal: Error {error} from mediawiki') from error
 
             newrevid = result.get('edit', {}).get('newrevid')
             warn(f'Pushed file: {new_sha1} - {title}')
@@ -960,11 +960,13 @@ class GitRemoteMediaWiki:
         for one_refspec in refspecs:
             match = re.match(r'^(\+)?([^:]*):([^:]*)$', one_refspec)
             if not match:
-                die('Invalid refspec for push. Expected <src>:<dst> or +<src>:<dst>')
+                raise SystemExit(
+                    'Invalid refspec for push. Expected <src>:<dst> or +<src>:<dst>'
+                )
             force, local, remote = match.groups()
             if force:
                 warn('Warning: forced push not allowed on a MediaWiki.')
-            if local == EMPTY:
+            if not local:
                 warn('Cannot delete remote branch on a MediaWiki')
                 emit(f'error {remote} cannot delete\n')
                 continue
@@ -1024,7 +1026,7 @@ class GitRemoteMediaWiki:
                     for parent in parents.split(' '):
                         local_ancestry[parent] = child
                 elif not re.match(r'^-?[a-f0-9]+$', line):
-                    die(f'Unexpected output from git rev-list: {line}')
+                    raise SystemExit(f'Unexpected output from git rev-list: {line}')
             while parsed_sha1 != head_sha1:
                 child = local_ancestry.get(parsed_sha1)
                 if not child:
@@ -1067,7 +1069,7 @@ class GitRemoteMediaWiki:
                     # middle, but still give an accurate error message.
                     return self.error_non_fast_forward(remote)
                 if status != 'ok':
-                    die('Unknown error from mw_push_file()')
+                    raise SystemExit('Unknown error from mw_push_file()')
             if not self.dumb_push:
                 run_git(
                     [
@@ -1168,7 +1170,7 @@ class GitRemoteMediaWiki:
 
 
 def exit_error_usage():
-    die(
+    raise SystemExit(
         'ERROR: git-remote-mediawiki module was not called with a correct number of\n'
         'parameters\n'
         'You may obtain this error because you attempted to run the git-remote-mediawiki\n'
