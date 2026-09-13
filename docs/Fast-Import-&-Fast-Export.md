@@ -3,7 +3,7 @@ Note : this page completes information from [Remote Helpers](Remote-Helpers.md)
 The format of data exchanged between mediawiki is the fast-import / fast-export format of git.
 
 Both directions - import and export - use the [mediawiki API](http://www.mediawiki.org/wiki/API:Main_page). 
-Scripts are written in Perl mainly because mediawiki's API in perl was a fit to our needs and we already had at our disposal a perl script to help us.
+Scripts are written in Python, and talk to the API through [mwclient](https://github.com/mwclient/mwclient).
 
 ## Mediawiki -> Git
 

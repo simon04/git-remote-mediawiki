@@ -41,7 +41,7 @@ test_expect_failure 'git push can upload media (File:) files' '
 		git add Foo.txt &&
 		git commit -m "add a text file" &&
 		git push &&
-		perl -e "print STDOUT \"binary content: \".chr(255);" >Foo.txt &&
+		python3 -c 'import sys; sys.stdout.buffer.write(b"binary content: \xff")' >Foo.txt &&
 		git add Foo.txt &&
 		git commit -m "add a text file with binary content" &&
 		git push
@@ -64,7 +64,7 @@ test_expect_success 'git push can upload media (File:) files containing valid UT
 	git clone mediawiki::'"$WIKI_URL"' mw_dir &&
 	(
 		cd mw_dir &&
-		perl -e "print STDOUT \"UTF-8 content: éèàéê€.\";" >Bar.txt &&
+		python3 -c 'import sys; sys.stdout.buffer.write("UTF-8 content: éèàéê€.".encode())' >Bar.txt &&
 		git add Bar.txt &&
 		git commit -m "add a text file with UTF-8 content" &&
 		git push

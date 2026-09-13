@@ -123,7 +123,7 @@ test_push_pull () {
 			git add Foo.mw &&
 			git commit -m "conflict created" &&
 			test_must_fail git pull &&
-			perl -pi -e "s/[<=>].*//g" Foo.mw &&
+			python3 -c 'import re, sys; p = sys.argv[1]; open(p, "w").write(re.sub(r"[<=>].*", "", open(p).read()))' Foo.mw &&
 			git commit -am "merge conflict solved" &&
 			git push
 		)

@@ -7,6 +7,54 @@ repository thanks to remote-helpers.
 
 **For more information, read the [User manual](docs/User-manual.md).**
 
+## Installation
+
+The scripts are Python 3.14 programs that declare their dependencies inline
+([PEP 723](https://peps.python.org/pep-0723/)), so the only prerequisite is
+[uv](https://docs.astral.sh/uv/) — it fetches a suitable Python and the single
+dependency, [mwclient](https://github.com/mwclient/mwclient), on first run.
+
+```shell
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or: apt/brew/pkg install uv
+
+install -m 755 git-remote-mediawiki git-mw "$(git --exec-path)"
+install -m 644 git_mediawiki.py "$(git --exec-path)"
+```
+
+`git_mediawiki.py` is imported by both scripts from their own directory, so it
+has to be installed alongside them.
+
+See the [User manual](docs/User-manual.md) for the other installation options.
+
+## Usage
+
+```shell
+git clone mediawiki::http://example.com/wiki/
+git mw preview Some_page.mw
+```
+
+To try the scripts without installing them, use the wrapper, which puts this
+directory first on `PATH`:
+
+```shell
+bin-wrapper/git clone mediawiki::http://example.com/wiki/
+bin-wrapper/git mw preview Some_page.mw
+```
+
+## Development
+
+```shell
+# Lint
+uvx ruff check git-remote-mediawiki git-mw git_mediawiki.py t/test-gitmw.py
+
+# Set up a local MediaWiki to test against (once), see t/README for details
+(cd t && ./install-wiki.sh install)
+
+# Run the whole test suite, or a single test (both from within t/)
+make -C t test
+(cd t && ./t9360-mw-to-git-clone.sh --verbose)
+```
+
 ## Who are we ?
 
 Git-Mediawiki was essentially developed by [Ensimag](http://ensimag.grenoble-inp.fr/) students (see the logs for the detailed list of authors), supervised  by [Matthieu Moy](https://matthieu-moy.fr/), with the help of the [git community](http://git.kernel.org/).

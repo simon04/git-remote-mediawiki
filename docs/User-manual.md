@@ -4,39 +4,21 @@ You need to have Git installed on your machine. See the [help with setup for Win
 
 ### Dependencies
 
-You need to have the following Perl packages installed:
-
-* __MediaWiki::API__ (recent version. Version 0.39 works. Version 0.34 won't work with mediafiles)
-* __DateTime::Format::ISO8601__
-
-On many distributions of Linux, these can be installed from packages `libmediawiki-api-perl` and `libdatetime-format-iso8601-perl`, respectively.
-
-For Gentoo-based Linux distributions they can be installed by emerging `dev-perl/MediaWiki-API` and `dev-perl/DateTime-Format-ISO8601`.
-
-On OS X, they can be installed using the CPAN installation tool:
+The scripts are Python 3.14 programs that declare their dependencies inline
+([PEP 723](https://peps.python.org/pep-0723/)), so the only thing you need to
+install is [uv](https://docs.astral.sh/uv/):
 
 ```shell
-sudo cpan MediaWiki::API
-sudo cpan DateTime::Format::ISO8601
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-On FreeBSD, both dependencies are available from ports or packages:
-```shell
-# Through packages
-pkg install p5-MediaWiki-API p5-DateTime-Format-ISO8601
+uv is also packaged for most distributions (`apt install uv`, `brew install uv`,
+`emerge dev-python/uv`, `pkg install uv`, ...).
 
-# Through ports
-cd /usr/ports/devel/p5-DateTime-Format-ISO8601
-make install
-cd /usr/ports/devel/p5-MediaWiki-API
-make install
-```
-
-To access HTTPS wikis, you may also need
-
-* __LWP::Protocol::https__
-
-On Linux, the package is called `perl-lwp-protocol-https`, or `liblwp-protocol-https-perl` on Debian-based systems.
+The first run downloads a suitable Python interpreter and the only third-party
+dependency, [mwclient](https://github.com/mwclient/mwclient), into a cached
+environment; later runs reuse it.
 
 ### Git-Mediawiki
 
@@ -44,16 +26,21 @@ The latest version of Git-Mediawiki is available in Git's source tree, in the di
 
 #### Installing from source
 
-After configuring Git's tree (either `./configure --prefix=...` or edit `config.mak` manually), run `make install` from the directory `contrib/mw-to-git`. This will install the script `git-remote-mediawiki` in your `PATH`.
+Copy the scripts into Git's exec path, which is already on your `PATH`:
+
+```shell
+install -m 755 git-remote-mediawiki git-mw "$(git --exec-path)"
+install -m 644 git_mediawiki.py "$(git --exec-path)"
+```
 
 #### Installing manually
 
-Alternatively, you may install Git-Mediawiki manually:
+Alternatively, you may install Git-Mediawiki step by step:
 
-1. Copy or symlink `git-remote-mediawiki` to Git's exec path (run `git --exec-path` to find out where it is). Make sure it is called `git-remote-mediawiki` with no suffix, _not_ `git-remote-mediawiki.perl`.
+1. Copy or symlink `git-remote-mediawiki` to Git's exec path (run `git --exec-path` to find out where it is). Make sure it is called `git-remote-mediawiki` with no suffix, _not_ `git-remote-mediawiki.py`.
 2. Ensure that `git-remote-mediawiki` is marked as executable.
 3. Optionally, do the same for `git-mw`, which contains various helper commands for Git/MediaWiki integration.
-4. Set your `PERL5LIB` environment variable to include the necessary directories: `$GIT/perl:$GIT/contrib/mw-to-git`, where `$GIT` is the path to your Git source tree. Without this step, you may receive errors about missing Perl dependencies `Git.pm` and/or `Git::Mediawiki.pm`.
+4. Copy `git_mediawiki.py` next to them. Both scripts import it from their own directory, so it has to sit in the same directory as the copies (if you symlinked in step 1, it has to sit next to the symlink targets instead).
 
 ## Getting started with Git-Mediawiki
 
@@ -148,18 +135,18 @@ One can set `remote.<name>.fetchStrategy` to `by_rev`. Then, git-remote-mediawik
 
 ## Issues with SSL, self-signed or unrecognized certificates
 
-By default, git-remote-mediawiki will verify SSL certificate with recent versions of libwww-perl (but not with older versions, for which the library does not do it by default).
+By default, git-remote-mediawiki verifies the SSL certificate of the wiki.
 
 If your wiki uses a self-signed certificate, git-remote-mediawiki won't be able to connect to it. There are several solutions:
 
 * The insecure way: disable SSL verification:
 
-        PERL_LWP_SSL_VERIFY_HOSTNAME=0 git pull
+        CURL_CA_BUNDLE= git pull
      
 * The more secure way: download, install, and trust the certificate. This won't give you 100% guarantee that the certificate is correct, but if an attacker tries to spoof the hostname after you've downloaded the certificate, you should notice it:
 
         echo | openssl s_client -showcerts -connect wiki.example.com:443 > certs.pem
-        HTTPS_CA_FILE=certs.pem git pull
+        REQUESTS_CA_BUNDLE=certs.pem git pull
 
 ## Cloning mediawiki repositories
 

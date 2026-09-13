@@ -1,4 +1,8 @@
-#!/usr/bin/perl
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["mwclient>=0.11"]
+# ///
 
 # Copyright (C) 2013
 #     Benoit Person <benoit.person@ensimag.imag.fr>
@@ -8,74 +12,312 @@
 # Set of tools for git repo with a mediawiki remote.
 # Documentation & bugtracker: https://github.com/Git-Mediawiki/Git-Mediawiki
 
-use strict;
-use warnings;
-use lib (split(/:/, $ENV{GITPERLLIB} || ''));
+import argparse
+import re
+import subprocess
+import sys
+from html import escape
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import urljoin
 
-use Getopt::Long;
-use URI::URL qw(url);
-use LWP::UserAgent;
-use HTML::TreeBuilder;
+# Allow the sibling git_mediawiki module to be imported even when this script
+# is installed (or symlinked) into Git's exec path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-use Git;
-use MediaWiki::API;
-use Git::Mediawiki qw(clean_filename connect_maybe EMPTY HTTP_CODE_PAGE_NOT_FOUND);
-
-# By default, use UTF-8 to communicate with Git and the user
-binmode STDERR, ':encoding(UTF-8)';
-binmode STDOUT, ':encoding(UTF-8)';
+from git_mediawiki import (
+    EMPTY,
+    HTTP_CODE_OK,
+    HTTP_CODE_PAGE_NOT_FOUND,
+    WIKI_ERRORS,
+    clean_filename,
+    connect_maybe,
+    die,
+    git_config,
+    run_git,
+)
 
 # Global parameters
-my $verbose = 0;
-sub v_print {
-	if ($verbose) {
-		return print {*STDERR} @_;
-	}
-	return;
-}
+verbose = False
 
-# Preview parameters
-my $file_name = EMPTY;
-my $remote_name = EMPTY;
-my $preview_file_name = EMPTY;
-my $autoload = 0;
-sub file {
-	$file_name = shift;
-	return $file_name;
-}
 
-my %commands = (
-	'help' =>
-	[\&help, {}, \&help],
-	'preview' =>
-	[\&preview, {
-		'<>' => \&file,
-		'output|o=s' => \$preview_file_name,
-		'remote|r=s' => \$remote_name,
-		'autoload|a' => \$autoload
-	}, \&preview_help]
-);
+def v_print(text):
+    """Print ``text`` on stderr, but only in verbose mode."""
+    if verbose:
+        print(text, end='', file=sys.stderr)
 
-# Search for sub-command
-my $cmd = $commands{'help'};
-for (0..@ARGV-1) {
-	if (defined $commands{$ARGV[$_]}) {
-		$cmd = $commands{$ARGV[$_]};
-		splice @ARGV, $_, 1;
-		last;
-	}
-};
-GetOptions( %{$cmd->[1]},
-						'help|h' => \&{$cmd->[2]},
-						'verbose|v'  => \$verbose);
 
-# Launch command
-&{$cmd->[0]};
+############################# HTML manipulation ################################
 
-############################# Preview Functions ################################
 
-sub preview_help {
-	print {*STDOUT} <<'END';
+class TemplateMerger(HTMLParser):
+    """Splice rendered wiki content into a page template.
+
+    The children of the element carrying ``content_id`` are replaced by
+    ``content``, and every URL-bearing attribute is made absolute relative to
+    ``base_url``. The rest of the template is reproduced as-is.
+    """
+
+    # Attributes that hold a URL and therefore need to be made absolute.
+    LINK_ATTRIBUTES = frozenset(
+        {'action', 'background', 'cite', 'href', 'longdesc', 'poster', 'src'}
+    )
+
+    # Elements that never have a closing tag, and so cannot be descended into.
+    VOID_ELEMENTS = frozenset(
+        {
+            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+            'link', 'meta', 'param', 'source', 'track', 'wbr',
+        }
+    )
+
+    def __init__(self, content, content_id, base_url):
+        super().__init__(convert_charrefs=False)
+        self.content = content
+        self.content_id = content_id
+        self.base_url = base_url
+        self.pieces = []
+        self.found = False
+        self.skip_tag = None
+        self.skip_depth = 0
+
+    def result(self):
+        """Return the merged document."""
+        return ''.join(self.pieces)
+
+    def _emit(self, text):
+        if not self.skip_depth:
+            self.pieces.append(text)
+
+    def _format_tag(self, tag, attrs, self_closing):
+        parts = [tag]
+        for name, value in attrs:
+            if value is None:
+                parts.append(name)
+                continue
+            if name in self.LINK_ATTRIBUTES and '#' not in value:
+                value = urljoin(self.base_url, value)
+            parts.append(f'{name}="{escape(value, quote=True)}"')
+        return '<{}{}>'.format(' '.join(parts), ' /' if self_closing else '')
+
+    def handle_starttag(self, tag, attrs):
+        if self.skip_depth:
+            if tag == self.skip_tag:
+                self.skip_depth += 1
+            return
+        self.pieces.append(self._format_tag(tag, attrs, False))
+        is_target = any(name == 'id' and value == self.content_id for name, value in attrs)
+        if is_target and not self.found and tag not in self.VOID_ELEMENTS:
+            self.found = True
+            self.pieces.append(self.content)
+            self.skip_tag = tag
+            self.skip_depth = 1
+
+    def handle_endtag(self, tag):
+        if self.skip_depth:
+            if tag != self.skip_tag:
+                return
+            self.skip_depth -= 1
+            if self.skip_depth:
+                return
+            self.skip_tag = None
+        self.pieces.append(f'</{tag}>')
+
+    def handle_startendtag(self, tag, attrs):
+        self._emit(self._format_tag(tag, attrs, True))
+
+    def handle_data(self, data):
+        self._emit(data)
+
+    def handle_entityref(self, name):
+        self._emit(f'&{name};')
+
+    def handle_charref(self, name):
+        self._emit(f'&#{name};')
+
+    def handle_comment(self, data):
+        self._emit(f'<!--{data}-->')
+
+    def handle_decl(self, decl):
+        self._emit(f'<!{decl}>')
+
+    def handle_pi(self, data):
+        self._emit(f'<?{data}>')
+
+    def unknown_decl(self, data):
+        self._emit(f'<![{data}]>')
+
+
+def merge_contents(template, content, remote_url, remote_name):
+    """Insert ``content`` into ``template`` and absolutize its links."""
+    template_content_id = (
+        git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
+    )
+    v_print(f"Using '{template_content_id}' as the content ID\n")
+
+    merger = TemplateMerger(content, template_content_id, remote_url)
+    merger.feed(template)
+    merger.close()
+
+    if not merger.found:
+        print(
+            'Could not combine the new content with the template. You might want to\n'
+            'configure `mediawiki.IDContent` in your config:\n'
+            f'\tgit config --add remote.{remote_name}.mwIDcontent <id>\n'
+            'and re-run the command afterward.',
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    return merger.result()
+
+
+############################### Git helpers ###################################
+
+
+def is_valid_remote(remote):
+    return remote in run_git(['remote']).split()
+
+
+def find_mediawiki_remotes():
+    return [
+        remote
+        for remote in run_git(['remote']).split()
+        if mediawiki_remote_url_maybe(remote)
+    ]
+
+
+def find_upstream_remote_name():
+    current_branch = run_git(['symbolic-ref', '--short', 'HEAD'], quiet=True).strip()
+    if not current_branch:
+        return None
+    return git_config(f'branch.{current_branch}.remote')
+
+
+def mediawiki_remote_url_maybe(remote):
+    """Return the wiki URL of ``remote``, or None if it is not a wiki."""
+    remote_url = git_config(f'remote.{remote}.url')
+    prefix = 'mediawiki::'
+    if remote_url.startswith(prefix):
+        return remote_url[len(prefix) :]
+    return None
+
+
+############################# Preview Functions ###############################
+
+
+def get_template(wiki, url, page_name):
+    """Retrieve the HTML rendering of ``page_name``, used as a template."""
+    response = wiki.session.get(f'{url}/index.php', params={'title': page_name})
+    if response.status_code == HTTP_CODE_OK:
+        return response.text
+
+    code = response.status_code
+    url_after = response.url  # resolve all redirections
+    if code != HTTP_CODE_PAGE_NOT_FOUND:
+        die(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
+
+    v_print(
+        f"Warning: Failed to retrieve '{page_name}'. Create it on the mediawiki if you want\n"
+        'all the links to work properly.\n'
+        'Trying to use the mediawiki homepage as a fallback template ...\n'
+    )
+    # requests automatically redirects GET requests
+    response = wiki.session.get(f'{url}/index.php')
+    if response.status_code != HTTP_CODE_OK:
+        die(f'Failed to get homepage @ {response.url} w/ code {code}')
+    return response.text
+
+
+def select_remote(remote_name):
+    """Return the (name, url) of the mediawiki remote to preview against."""
+    if remote_name != EMPTY:
+        if not is_valid_remote(remote_name):
+            die(f'{remote_name} is not a remote')
+        remote_url = mediawiki_remote_url_maybe(remote_name)
+        if not remote_url:
+            die(f'{remote_name} is not a mediawiki remote')
+        return remote_name, remote_url
+
+    remote_name = find_upstream_remote_name()
+    remote_url = mediawiki_remote_url_maybe(remote_name) if remote_name else None
+    if remote_url:
+        return remote_name, remote_url
+
+    valid_remotes = find_mediawiki_remotes()
+    if not valid_remotes:
+        print('No mediawiki remote in this repo.', file=sys.stderr)
+    else:
+        remotes_list = '\n\t'.join(valid_remotes)
+        print(
+            'There are multiple mediawiki remotes, which of:\n'
+            f'\t{remotes_list}\n'
+            'do you want ? Use the -r option to specify the remote.',
+            file=sys.stderr,
+        )
+    raise SystemExit(1)
+
+
+def read_file_content(file_name):
+    """Return the content of ``file_name``, falling back to a Git blob."""
+    path = Path(file_name)
+    if path.exists():
+        return path.read_text(encoding='utf-8'), file_name
+
+    file_content = run_git(['cat-file', 'blob', file_name])
+    prefix, separator, suffix = file_name.rpartition(':')
+    if separator and prefix and suffix:
+        file_name = suffix
+    return file_content, file_name
+
+
+def preview(args):
+    if args.file == EMPTY:
+        die('Missing file argument, see `git mw help`')
+
+    v_print('### Selecting remote\n')
+    remote_name, remote_url = select_remote(args.remote)
+    v_print(f'selected remote:\n\tname: {remote_name}\n\turl: {remote_url}\n')
+
+    try:
+        wiki = connect_maybe(None, remote_name, remote_url)
+    except WIKI_ERRORS as error:
+        die(f'Could not connect to {remote_url}: {error}')
+
+    file_content, file_name = read_file_content(args.file)
+
+    v_print('### Retrieving template\n')
+    wiki_page_name = re.sub(r'\.[^.]+$', '', clean_filename(file_name))
+    template = get_template(wiki, remote_url, wiki_page_name)
+
+    v_print('### Parsing local content\n')
+    try:
+        parsed = wiki.api('parse', text=file_content, title=wiki_page_name)
+    except WIKI_ERRORS as error:
+        die(f'No response from remote mediawiki: {error}')
+    new_content = parsed['parse']['text']['*']
+
+    v_print('### Merging contents\n')
+    preview_file_name = args.output
+    if preview_file_name == EMPTY:
+        preview_file_name = re.sub(r'\.[^.]+$', '.html', file_name)
+    Path(preview_file_name).write_text(
+        merge_contents(template, new_content, remote_url, remote_name),
+        encoding='utf-8',
+    )
+
+    v_print('### Results\n')
+    if args.autoload:
+        v_print(f'Launching browser w/ file: {preview_file_name}')
+        subprocess.run(['git', 'web--browse', preview_file_name], check=False)
+    else:
+        print(f'Preview file saved as: {preview_file_name}', file=sys.stderr)
+
+
+############################### Help Functions ################################
+
+
+PREVIEW_HELP = """\
 USAGE: git mw preview [--remote|-r <remote name>] [--autoload|-a]
                       [--output|-o <output filename>] [--verbose|-v]
                       <blob> | <filename>
@@ -115,254 +357,69 @@ OPTIONS:
 
     -v, --verbose
         Show more information on what's going on under the hood.
-END
-	exit;
-}
+"""
 
-sub preview {
-	my $wiki;
-	my ($remote_url, $wiki_page_name);
-	my ($new_content, $template);
-	my $file_content;
-
-	if ($file_name eq EMPTY) {
-		die "Missing file argument, see `git mw help`\n";
-	}
-
-	v_print("### Selecting remote\n");
-	if ($remote_name eq EMPTY) {
-		$remote_name = find_upstream_remote_name();
-		if ($remote_name) {
-			$remote_url = mediawiki_remote_url_maybe($remote_name);
-		}
-
-		if (! $remote_url) {
-			my @valid_remotes = find_mediawiki_remotes();
-
-			if ($#valid_remotes == 0) {
-				print {*STDERR} "No mediawiki remote in this repo. \n";
-				exit 1;
-			} else {
-				my $remotes_list = join("\n\t", @valid_remotes);
-				print {*STDERR} <<"MESSAGE";
-There are multiple mediawiki remotes, which of:
-	${remotes_list}
-do you want ? Use the -r option to specify the remote.
-MESSAGE
-			}
-
-			exit 1;
-		}
-	} else {
-		if (!is_valid_remote($remote_name)) {
-			die "${remote_name} is not a remote\n";
-		}
-
-		$remote_url = mediawiki_remote_url_maybe($remote_name);
-		if (! $remote_url) {
-			die "${remote_name} is not a mediawiki remote\n";
-		}
-	}
-	v_print("selected remote:\n\tname: ${remote_name}\n\turl: ${remote_url}\n");
-
-	$wiki = connect_maybe($wiki, $remote_name, $remote_url);
-
-	# Read file content
-	if (! -e $file_name) {
-		$file_content = git_cmd_try {
-			Git::command('cat-file', 'blob', $file_name); }
-			"%s failed w/ code %d";
-
-		if ($file_name =~ /(.+):(.+)/) {
-			$file_name = $2;
-		}
-	} else {
-		open my $read_fh, "<", $file_name
-			or die "could not open ${file_name}: $!\n";
-		$file_content = do { local $/ = undef; <$read_fh> };
-		close $read_fh
-			or die "unable to close: $!\n";
-	}
-
-	v_print("### Retrieving template\n");
-	($wiki_page_name = clean_filename($file_name)) =~ s/\.[^.]+$//;
-	$template = get_template($remote_url, $wiki_page_name);
-
-	v_print("### Parsing local content\n");
-	$new_content = $wiki->api({
-		action => 'parse',
-		text => $file_content,
-		title => $wiki_page_name
-	}, {
-		skip_encoding => 1
-	}) or die "No response from remote mediawiki\n";
-	$new_content = $new_content->{'parse'}->{'text'}->{'*'};
-
-	v_print("### Merging contents\n");
-	if ($preview_file_name eq EMPTY) {
-		($preview_file_name = $file_name) =~ s/\.[^.]+$/.html/;
-	}
-	open(my $save_fh, '>:encoding(UTF-8)', $preview_file_name)
-		or die "Could not open: $!\n";
-	print {$save_fh} merge_contents($template, $new_content, $remote_url);
-	close($save_fh)
-		or die "Could not close: $!\n";
-
-	v_print("### Results\n");
-	if ($autoload) {
-		v_print("Launching browser w/ file: ${preview_file_name}");
-		system('git', 'web--browse', $preview_file_name);
-	} else {
-		print {*STDERR} "Preview file saved as: ${preview_file_name}\n";
-	}
-
-	exit;
-}
-
-# uses global scope variable: $remote_name
-sub merge_contents {
-	my $template = shift;
-	my $content = shift;
-	my $remote_url = shift;
-	my ($content_tree, $html_tree, $mw_content_text);
-	my $template_content_id = 'bodyContent';
-
-	$html_tree = HTML::TreeBuilder->new;
-	$html_tree->parse($template);
-
-	$content_tree = HTML::TreeBuilder->new;
-	$content_tree->parse($content);
-
-	$template_content_id = Git::config("remote.${remote_name}.mwIDcontent")
-		|| $template_content_id;
-	v_print("Using '${template_content_id}' as the content ID\n");
-
-	$mw_content_text = $html_tree->look_down('id', $template_content_id);
-	if (!defined $mw_content_text) {
-		print {*STDERR} <<"CONFIG";
-Could not combine the new content with the template. You might want to
-configure `mediawiki.IDContent` in your config:
-	git config --add remote.${remote_name}.mwIDcontent <id>
-and re-run the command afterward.
-CONFIG
-		exit 1;
-	}
-	$mw_content_text->delete_content();
-	$mw_content_text->push_content($content_tree);
-
-	make_links_absolute($html_tree, $remote_url);
-
-	return $html_tree->as_HTML;
-}
-
-sub make_links_absolute {
-	my $html_tree = shift;
-	my $remote_url = shift;
-	for (@{ $html_tree->extract_links() }) {
-		my ($link, $element, $attr) = @{ $_ };
-		my $url = url($link)->canonical;
-		if ($url !~ /#/) {
-			$element->attr($attr, URI->new_abs($url, $remote_url));
-		}
-	}
-	return $html_tree;
-}
-
-sub is_valid_remote {
-	my $remote = shift;
-	my @remotes = git_cmd_try {
-		Git::command('remote') }
-		"%s failed w/ code %d";
-	my $found_remote = 0;
-	foreach my $remote (@remotes) {
-		if ($remote eq $remote) {
-			$found_remote = 1;
-			last;
-		}
-	}
-	return $found_remote;
-}
-
-sub find_mediawiki_remotes {
-	my @remotes = git_cmd_try {
-		Git::command('remote'); }
-		"%s failed w/ code %d";
-	my $remote_url;
-	my @valid_remotes = ();
-	foreach my $remote (@remotes) {
-		$remote_url = mediawiki_remote_url_maybe($remote);
-		if ($remote_url) {
-			push(@valid_remotes, $remote);
-		}
-	}
-	return @valid_remotes;
-}
-
-sub find_upstream_remote_name {
-	my $current_branch = git_cmd_try {
-		Git::command_oneline('symbolic-ref', '--short', 'HEAD') }
-		"%s failed w/ code %d";
-	return Git::config("branch.${current_branch}.remote");
-}
-
-sub mediawiki_remote_url_maybe {
-	my $remote = shift;
-
-	# Find remote url
-	my $remote_url = Git::config("remote.${remote}.url");
-	if ($remote_url =~ s/mediawiki::(.*)/$1/) {
-		return url($remote_url)->canonical;
-	}
-
-	return;
-}
-
-sub get_template {
-	my $url = shift;
-	my $page_name = shift;
-	my ($req, $res, $code, $url_after);
-
-	$req = LWP::UserAgent->new;
-	if ($verbose) {
-		$req->show_progress(1);
-	}
-
-	$res = $req->get("${url}/index.php?title=${page_name}");
-	if (!$res->is_success) {
-		$code = $res->code;
-		$url_after = $res->request()->uri(); # resolve all redirections
-		if ($code == HTTP_CODE_PAGE_NOT_FOUND) {
-			if ($verbose) {
-				print {*STDERR} <<"WARNING";
-Warning: Failed to retrieve '$page_name'. Create it on the mediawiki if you want
-all the links to work properly.
-Trying to use the mediawiki homepage as a fallback template ...
-WARNING
-			}
-
-			# LWP automatically redirects GET request
-			$res = $req->get("${url}/index.php");
-			if (!$res->is_success) {
-				$url_after = $res->request()->uri(); # resolve all redirections
-				die "Failed to get homepage @ ${url_after} w/ code ${code}\n";
-			}
-		} else {
-			die "Failed to get '${page_name}' @ ${url_after} w/ code ${code}\n";
-		}
-	}
-
-	return $res->decoded_content;
-}
-
-############################## Help Functions ##################################
-
-sub help {
-	print {*STDOUT} <<'END';
+HELP = """\
 usage: git mw <command> <args>
 
 git mw commands are:
     help        Display help information about git mw
     preview     Parse and render local file into HTML
-END
-	exit;
-}
+"""
+
+
+def help_command(_args=None):
+    print(HELP, end='')
+    raise SystemExit(0)
+
+
+def preview_help():
+    print(PREVIEW_HELP, end='')
+    raise SystemExit(0)
+
+
+#################################### Main #####################################
+
+
+def build_parser(command):
+    parser = argparse.ArgumentParser(prog=f'git mw {command}', add_help=False)
+    parser.add_argument('-h', '--help', action='store_true')
+    parser.add_argument('-v', '--verbose', action='store_true')
+    if command == 'preview':
+        parser.add_argument('file', nargs='?', default=EMPTY)
+        parser.add_argument('-o', '--output', default=EMPTY)
+        parser.add_argument('-r', '--remote', default=EMPTY)
+        parser.add_argument('-a', '--autoload', action='store_true')
+    return parser
+
+
+def main(argv):
+    global verbose
+
+    # By default, use UTF-8 to communicate with Git and the user
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
+    commands = {'help': help_command, 'preview': preview}
+
+    # Search for sub-command, wherever it appears on the command line.
+    argv = list(argv)
+    command = 'help'
+    for index, arg in enumerate(argv):
+        if arg in commands:
+            command = arg
+            del argv[index]
+            break
+
+    args = build_parser(command).parse_args(argv)
+    verbose = args.verbose
+
+    if args.help:
+        preview_help() if command == 'preview' else help_command()
+
+    # Launch command
+    commands[command](args)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

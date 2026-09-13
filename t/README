@@ -62,7 +62,7 @@ The provided tests are currently in the `contrib/mw-to-git/t` directory.
 The files are all the t936[0-9]-*.sh shell scripts.
 
 a. Run all tests:
-To do so, run "make test" from the contrib/mw-to-git/ directory.
+To do so, run "make test" from this directory.
 
 b. Run a specific test:
 To run a given test <test_name>, run ./<test_name> from the
@@ -77,7 +77,7 @@ Available functions
 The test environment of git-remote-mediawiki provides some functions
 useful to test its behaviour. for more details about the functions'
 parameters, please refer to the `test-gitmw-lib.sh` and
-`test-gitmw.pl` files.
+`test-gitmw.py` files.
 
 ** `test_check_wiki_precond`:
 Check if the tests must be skipped or not. Please use this function
@@ -94,7 +94,7 @@ Delete a given page from the wiki.
 Create or modify a given page in the wiki. You can specify several
 parameters like a summary for the page edition, or add the page to a
 given category.
-See test-gitmw.pl for more details.
+See test-gitmw.py for more details.
 
 ** `wiki_getallpage`:
 Fetch all pages from the wiki into a given directory. The directory

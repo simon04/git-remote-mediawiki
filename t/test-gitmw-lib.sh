@@ -27,19 +27,19 @@ else
 fi
 
 wiki_upload_file () {
-	"$CURR_DIR"/test-gitmw.pl upload_file "$@"
+	"$CURR_DIR"/test-gitmw.py upload_file "$@"
 }
 
 wiki_getpage () {
-	"$CURR_DIR"/test-gitmw.pl get_page "$@"
+	"$CURR_DIR"/test-gitmw.py get_page "$@"
 }
 
 wiki_delete_page () {
-	"$CURR_DIR"/test-gitmw.pl delete_page "$@"
+	"$CURR_DIR"/test-gitmw.py delete_page "$@"
 }
 
 wiki_editpage () {
-	"$CURR_DIR"/test-gitmw.pl edit_page "$@"
+	"$CURR_DIR"/test-gitmw.py edit_page "$@"
 }
 
 die () {
@@ -197,14 +197,14 @@ wiki_page_exist () {
 #
 # Fetch the name of each page on the wiki.
 wiki_getallpagename () {
-	"$CURR_DIR"/test-gitmw.pl getallpagename
+	"$CURR_DIR"/test-gitmw.py getallpagename
 }
 
 # wiki_getallpagecategory <category>
 #
 # Fetch the name of each page belonging to <category> on the wiki.
 wiki_getallpagecategory () {
-	"$CURR_DIR"/test-gitmw.pl getallpagename "$@"
+	"$CURR_DIR"/test-gitmw.py getallpagename "$@"
 }
 
 # wiki_getallpage <dest_dir> [<category>]

@@ -1,2 +1,5 @@
-git-remote-mediawiki
-git-mw
+WEB/
+mediawiki/
+trash directory.t*/
+test-results/
+__pycache__/

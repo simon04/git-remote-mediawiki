@@ -1,13 +1,12 @@
 #!/bin/sh
 
 # git executable wrapper script for Git-Mediawiki to run tests without
-# installing all the scripts and perl packages.
+# installing the scripts in Git's exec path.
 
 ROOT_DIR=$(dirname "$0")/..
 
-GITPERLLIB="$ROOT_DIR${GITPERLLIB:+:$GITPERLLIB}"
 PATH="$ROOT_DIR:$PATH"
 
-export GITPERLLIB PATH
+export PATH
 
 exec "${GIT_EXEC_PATH:-/usr/bin/}git" "$@"
