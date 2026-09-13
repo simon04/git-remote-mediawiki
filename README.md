@@ -59,6 +59,9 @@ uv run ty check --extra-search-path . --extra-search-path t
 python3 -m unittest discover --start-directory t --verbose
 ```
 
+See [the test suite's README](t/README.md) for how the stand-in works and how
+to add a test.
+
 ## What changed in this fork
 
 Upstream had been looking for a new maintainer since [issue #33](https://github.com/Git-Mediawiki/Git-Mediawiki/issues/33).
