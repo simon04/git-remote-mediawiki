@@ -186,7 +186,7 @@ class MediaWiki:
             parts.netloc,
             path=path,
             scheme=parts.scheme or 'http',
-            clients_useragent=f'git-mediawiki/{VERSION} (https://github.com/Git-Mediawiki/Git-Mediawiki)',
+            clients_useragent=f'git-remote-mediawiki/{VERSION} (https://github.com/simon04/git-remote-mediawiki)',
             force_login=False,
         )
 

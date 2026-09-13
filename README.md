@@ -1,6 +1,6 @@
-## What is Git-Mediawiki ?
+## What is git-remote-mediawiki ?
 
-Git-Mediawiki is a project which aims the creation of a gate
+git-remote-mediawiki is a project which aims the creation of a gate
 between git and mediawiki, allowing git users to push and pull
 objects from mediawiki just as one would do with a classic git
 repository thanks to remote-helpers.
@@ -60,17 +60,17 @@ make -C t test
 
 ## Who are we ?
 
+This is a fork of [Git-Mediawiki](https://github.com/Git-Mediawiki/Git-Mediawiki), which had been looking for a new maintainer since [issue #33](https://github.com/Git-Mediawiki/Git-Mediawiki/issues/33). It is maintained by [Simon Legner](https://github.com/simon04), and the scripts have been rewritten in Python.
+
 Git-Mediawiki was essentially developed by [Ensimag](http://ensimag.grenoble-inp.fr/) students (see the logs for the detailed list of authors), supervised  by [Matthieu Moy](https://matthieu-moy.fr/), with the help of the [git community](http://git.kernel.org/).
 
-Do not hesitate to contact us if you have any questions about the project.
-
-Note that Git-Mediawiki is currently looking for a new maintainer, see issue [#33](https://github.com/Git-Mediawiki/Git-Mediawiki/issues/33).
+Do not hesitate to open an issue if you have any questions about the project.
 
 ## Links
 
 * [User manual](docs/User-manual.md)
-* [Using Git-Mediawiki with Wikipedia](docs/Wikipedia.md)
-* [Bug tracking](https://github.com/Git-Mediawiki/Git-Mediawiki/issues)
+* [Using git-remote-mediawiki with Wikipedia](docs/Wikipedia.md)
+* [Bug tracking](https://github.com/simon04/git-remote-mediawiki/issues)
 * [Implementation documentation](docs/Implementation-documentation.md)
    * [Remote helpers](docs/Remote-Helpers.md)
    * [Fast import & Fast export](docs/Fast-Import-&-Fast-Export.md)

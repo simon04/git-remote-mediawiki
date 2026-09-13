@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# git executable wrapper script for Git-Mediawiki to run tests without
+# git executable wrapper script for git-remote-mediawiki to run tests without
 # installing the scripts in Git's exec path.
 
 ROOT_DIR=$(dirname "$0")/..

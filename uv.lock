@@ -106,7 +106,7 @@ wheels = [
 ]
 
 [[package]]
-name = "git-mediawiki"
+name = "git-remote-mediawiki"
 version = "0.1"
 source = { virtual = "." }
 

@@ -20,9 +20,9 @@ The first run downloads a suitable Python interpreter and the only third-party
 dependency, [mwclient](https://github.com/mwclient/mwclient), into a cached
 environment; later runs reuse it.
 
-### Git-Mediawiki
+### git-remote-mediawiki
 
-The latest version of Git-Mediawiki is available in Git's source tree, in the directory `contrib/mw-to-git`. You can download it from http://git.kernel.org/?p=git/git.git;a=tree;f=contrib/mw-to-git if needed. The recommended way to install Git-Mediawiki is to install both Git itself and Git-Mediawiki at the same time (so that you get the latest version of both). If you install Git-Mediawiki on top of an existing Git installation, you need Git >= 1.8.3, or use an old Git-Mediawiki version (the last commit which works with older versions is [commit edca4152](https://github.com/git/git/commit/edca4152560522a431a51fc0a06147fc680b5b18)).
+git-remote-mediawiki began life as `contrib/mw-to-git` in Git's own source tree, and was installed along with Git. It is no longer carried there, and this fork is a standalone Python rewrite, so there is nothing to build and no dependency on Git's build system -- only on having a reasonably recent `git` to run against.
 
 #### Installing from source
 
@@ -35,14 +35,14 @@ install -m 644 git_mediawiki.py "$(git --exec-path)"
 
 #### Installing manually
 
-Alternatively, you may install Git-Mediawiki step by step:
+Alternatively, you may install git-remote-mediawiki step by step:
 
 1. Copy or symlink `git-remote-mediawiki` to Git's exec path (run `git --exec-path` to find out where it is). Make sure it is called `git-remote-mediawiki` with no suffix, _not_ `git-remote-mediawiki.py`.
 2. Ensure that `git-remote-mediawiki` is marked as executable.
 3. Optionally, do the same for `git-mw`, which contains various helper commands for Git/MediaWiki integration.
 4. Copy `git_mediawiki.py` next to them. Both scripts import it from their own directory, so it has to sit in the same directory as the copies (if you symlinked in step 1, it has to sit next to the symlink targets instead).
 
-## Getting started with Git-Mediawiki
+## Getting started with git-remote-mediawiki
 
 Then, the first operation you should do is cloning the remote mediawiki. To do so, run the command
 
@@ -109,7 +109,7 @@ If you wiki requires specifying a domain when logging in (if you use LDAP authen
 
 Rather than storing the password in `.git/config`, you can set only `remote.origin.mwLogin` and let Git ask for the password through `git credential`, which hands it to whichever credential helper you have configured.
 
-Wikimedia wikis, Wikipedia among them, will not accept a main-account password here at all; they need a bot password. See [Using Git-Mediawiki with Wikipedia](Wikipedia.md).
+Wikimedia wikis, Wikipedia among them, will not accept a main-account password here at all; they need a bot password. See [Using git-remote-mediawiki with Wikipedia](Wikipedia.md).
 
 ## Previewing changes
 

@@ -11,7 +11,7 @@
 
 # tests for git-remote-mediawiki
 
-test_description='Test git-mediawiki with special characters in filenames'
+test_description='Test git-remote-mediawiki with special characters in filenames'
 
 . ./test-gitmw-lib.sh
 . ./sharness/sharness.sh

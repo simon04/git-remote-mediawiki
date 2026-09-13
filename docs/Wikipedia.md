@@ -1,8 +1,8 @@
-# Using Git-Mediawiki with Wikipedia
+# Using git-remote-mediawiki with Wikipedia
 
 Wikipedia is a MediaWiki like any other, but it is large, live, and has its own
 rules about how a program may log in. This page collects what you need to know
-before pointing Git-Mediawiki at it.
+before pointing git-remote-mediawiki at it.
 
 Everything below was checked against `en.wikipedia.org`, running MediaWiki
 1.47.0-wmf.19 at the time of writing. Other Wikimedia wikis behave the same way;
@@ -53,7 +53,7 @@ git clone -c remote.origin.categories="Version_control_systems" mediawiki::https
 
 ## Logging in needs a bot password
 
-Git-Mediawiki authenticates with the API's `action=login`. Wikipedia's own
+git-remote-mediawiki authenticates with the API's `action=login`. Wikipedia's own
 documentation for that module says:
 
 > Log in and get authentication cookies. This action should only be used in
@@ -81,7 +81,7 @@ Point the remote at the bot password's login name:
 git config remote.origin.mwLogin 'YourName@labelyoupicked'
 ```
 
-Leave the password out of the configuration. Git-Mediawiki asks
+Leave the password out of the configuration. git-remote-mediawiki asks
 `git credential` for it, so it is prompted for once and then kept by whatever
 credential helper you have configured, filed under the remote's URL:
 
@@ -114,7 +114,7 @@ MediaWiki"*:
 git push origin main:master
 ```
 
-You do not need to pull after a successful push: by default Git-Mediawiki
+You do not need to pull after a successful push: by default git-remote-mediawiki
 updates the notes and the remote reference itself, so the next `git pull`
 already knows those revisions came from you. That changes if you set
 `mediawiki.dumbPush`, which is described in
@@ -158,7 +158,7 @@ than on the English Wikipedia.
 
 ## Rate limits, and editing responsibly
 
-Git-Mediawiki makes **one API edit per changed file per commit**. Pushing a
+git-remote-mediawiki makes **one API edit per changed file per commit**. Pushing a
 branch of twenty commits produces twenty separate edits, each appearing on its
 own in the page history and in the watchlists of everyone following the page.
 Wikipedia rate-limits editing, and this pattern is, by any reasonable reading,
@@ -181,7 +181,7 @@ Recover with `git pull --rebase` and push again.
 Requests identify themselves as:
 
 ```
-git-mediawiki/0.01 (https://github.com/Git-Mediawiki/Git-Mediawiki) mwclient/0.11.0 (...)
+git-remote-mediawiki/0.01 (https://github.com/simon04/git-remote-mediawiki) mwclient/0.11.0 (...)
 ```
 
 That names the tool but carries no contact address, which
