@@ -10,6 +10,9 @@ insert_final_newline = true
 [*.yml]
 indent_style = space
 
+[*.toml]
+indent_style = space
+
 [{*.py,git-mw,git-remote-mediawiki}]
 indent_style = space
 indent_size = 4

@@ -1,8 +1,0 @@
-target-version = "py314"
-line-length = 100
-
-[lint]
-extend-select = ["E", "W", "I", "UP", "B", "C4", "FURB", "RUF"]
-
-[format]
-quote-style = "single"

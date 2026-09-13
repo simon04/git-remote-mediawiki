@@ -1,0 +1,24 @@
+# Git-Mediawiki is not a Python package. git-remote-mediawiki, git-mw and
+# t/test-gitmw.py are PEP 723 scripts that declare their own dependencies and
+# are installed by copying them into Git's exec path, so there is no [project]
+# table here -- this file exists to configure the tooling.
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+# The two executables have no .py suffix, so name them explicitly.
+extend-include = ["git-remote-mediawiki", "git-mw"]
+
+[tool.ruff.lint]
+extend-select = ["E", "W", "I", "UP", "B", "C4", "FURB", "RUF"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.mypy]
+python_version = "3.14"
+files = ["git_mediawiki.py", "git-remote-mediawiki", "git-mw", "t/test-gitmw.py"]
+# Both executables would otherwise be module "__main__" and collide.
+scripts_are_modules = true
+# mwclient ships no type information.
+ignore_missing_imports = true

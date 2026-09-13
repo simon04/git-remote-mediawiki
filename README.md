@@ -44,8 +44,9 @@ bin-wrapper/git mw preview Some_page.mw
 ## Development
 
 ```shell
-# Lint
-uvx ruff check git-remote-mediawiki git-mw git_mediawiki.py t/test-gitmw.py
+# Lint and type-check; both read their settings from pyproject.toml
+uvx ruff check .
+uvx --with mwclient --with requests mypy
 
 # Set up a local MediaWiki to test against (once), see t/README for details
 (cd t && ./install-wiki.sh install)
