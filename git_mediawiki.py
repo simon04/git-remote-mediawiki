@@ -5,6 +5,7 @@ scripts, which declare the ``mwclient`` dependency in their PEP 723
 inline metadata; it is not meant to be run on its own.
 """
 
+import functools
 import io
 import re
 import subprocess
@@ -50,15 +51,20 @@ __all__ = [
     'revision_content',
     'run_git',
     'smudge_filename',
+    'warn',
 ]
 
 # Used to test for empty strings
 EMPTY = ''
 
+# Progress reports and diagnostics go to stderr, where Git relays them to
+# the user without mixing them into the fast-import stream.
+warn = functools.partial(print, file=sys.stderr)
+
 
 def die(message):
     """Print ``message`` on stderr and exit, the way Perl's ``die`` did."""
-    print(message.rstrip('\n'), file=sys.stderr)
+    warn(message.rstrip('\n'))
     raise SystemExit(1)
 
 
@@ -284,14 +290,11 @@ def connect_maybe(wiki, remote_name, remote_url):
     try:
         wiki.login(credential['username'], credential['password'], wiki_domain)
     except WIKI_ERRORS as error:
-        print(
-            f'Failed to log in mediawiki user "{credential["username"]}" on {remote_url}',
-            file=sys.stderr,
-        )
-        print(f'  (error {error})', file=sys.stderr)
+        warn(f'Failed to log in mediawiki user "{credential["username"]}" on {remote_url}')
+        warn(f'  (error {error})')
         git_credential(credential, 'reject')
         raise SystemExit(1) from error
 
     git_credential(credential, 'approve')
-    print(f'Logged in mediawiki user "{credential["username"]}".', file=sys.stderr)
+    warn(f'Logged in mediawiki user "{credential["username"]}".')
     return wiki

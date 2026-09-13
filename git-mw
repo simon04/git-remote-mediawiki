@@ -35,6 +35,7 @@ from git_mediawiki import (
     die,
     git_config,
     run_git,
+    warn,
 )
 
 # Global parameters
@@ -44,7 +45,7 @@ verbose = False
 def v_print(text):
     """Print ``text`` on stderr, but only in verbose mode."""
     if verbose:
-        print(text, end='', file=sys.stderr)
+        warn(text, end='')
 
 
 ############################# HTML manipulation ################################
@@ -160,12 +161,11 @@ def merge_contents(template, content, remote_url, remote_name):
     merger.close()
 
     if not merger.found:
-        print(
+        warn(
             'Could not combine the new content with the template. You might want to\n'
             'configure `mediawiki.IDContent` in your config:\n'
             f'\tgit config --add remote.{remote_name}.mwIDcontent <id>\n'
             'and re-run the command afterward.',
-            file=sys.stderr,
         )
         raise SystemExit(1)
 
@@ -246,14 +246,13 @@ def select_remote(remote_name):
 
     valid_remotes = find_mediawiki_remotes()
     if not valid_remotes:
-        print('No mediawiki remote in this repo.', file=sys.stderr)
+        warn('No mediawiki remote in this repo.')
     else:
         remotes_list = '\n\t'.join(valid_remotes)
-        print(
+        warn(
             'There are multiple mediawiki remotes, which of:\n'
             f'\t{remotes_list}\n'
             'do you want ? Use the -r option to specify the remote.',
-            file=sys.stderr,
         )
     raise SystemExit(1)
 
@@ -311,7 +310,7 @@ def preview(args):
         v_print(f'Launching browser w/ file: {preview_file_name}')
         subprocess.run(['git', 'web--browse', preview_file_name], check=False)
     else:
-        print(f'Preview file saved as: {preview_file_name}', file=sys.stderr)
+        warn(f'Preview file saved as: {preview_file_name}')
 
 
 ############################### Help Functions ################################
