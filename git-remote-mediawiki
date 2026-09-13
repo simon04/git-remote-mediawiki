@@ -292,6 +292,8 @@ class GitRemoteMediaWiki:
         # Number of revisions written out so far by the current import; also
         # the fast-import mark of the last one.
         self.imported = 0
+        # Last timestamp seen per page, to stand in for a revision that has none.
+        self.last_timestamps: dict[str, datetime] = {}
 
         # In memory cache for MediaWiki namespace ids, seeded from the
         # configuration file, where they are stored as
@@ -844,6 +846,7 @@ class GitRemoteMediaWiki:
         keyed by page title: only revisions of those pages are imported.
         """
         self.imported = 0
+        self.last_timestamps = {}
         n = 0
         total = len(revision_ids)
 
@@ -865,67 +868,79 @@ class GitRemoteMediaWiki:
                     f'Failed to retrieve modified page for revision(s) {revs}'
                 ) from error
 
-            for result_page in result.get('query', {}).get('pages', {}).values():
-                self.handle_result_page(n, total, fetch_from, result_page, pages)
+            # The API groups revisions by page. Emit them in revision order
+            # instead: the note on the last commit written is what gates the
+            # next push, so it has to be the newest revision and not whichever
+            # page the API happened to return last.
+            revisions = sorted(
+                (
+                    (page['title'], rev)
+                    for page in result.get('query', {}).get('pages', {}).values()
+                    for rev in page.get('revisions', [])
+                ),
+                key=lambda item: item[1]['revid'],
+            )
+            for page_title, rev in revisions:
+                self.handle_revision(n, total, fetch_from, page_title, rev, pages)
 
         return self.imported
 
-    def handle_result_page(
+    def handle_revision(
         self,
         n: int,
         total: int,
         fetch_from: int,
-        result_page: ApiResult,
+        page_title: str,
+        rev: ApiResult,
         pages: dict[str, Page],
     ) -> None:
-        """Write out every wanted revision of one page, in order."""
-        page_title = result_page['title']
-        # Placeholder in case a revision has no timestamp.
-        last_timestamp = datetime.fromtimestamp(0, UTC)
+        """Write out one revision of one page."""
+        if page_title not in pages:
+            logger.warning(f'{n}/{total}: Skipping revision #{rev["revid"]} of {page_title}')
+            return
 
-        for rev in result_page.get('revisions', []):
-            if page_title not in pages:
-                logger.warning(f'{n}/{total}: Skipping revision #{rev["revid"]} of {page_title}')
-                continue
+        self.imported += 1
 
-            self.imported += 1
+        content = revision_content(rev)
+        if content is None:
+            # This may not be the best thing to do with suppressed
+            # revisions -- it creates a huge difference between three
+            # revisions (e.g. 100000 chars -> ~30 chars -> 100000 chars).
+            content = SUPPRESSED_REVISION
+        else:
+            content = self.mediawiki_smudge(content)
 
-            content = revision_content(rev)
-            if content is None:
-                # This may not be the best thing to do with suppressed
-                # revisions -- it creates a huge difference between three
-                # revisions (e.g. 100000 chars -> ~30 chars -> 100000 chars).
-                content = SUPPRESSED_REVISION
-            else:
-                content = self.mediawiki_smudge(content)
+        timestamp = rev.get('timestamp')
+        if timestamp is None:
+            # Stand in for a missing timestamp by bumping this page's previous
+            # one, so that its revisions stay in order.
+            previous = self.last_timestamps.get(page_title, datetime.fromtimestamp(0, UTC))
+            date = previous + timedelta(seconds=1)
+        else:
+            date = datetime.fromisoformat(timestamp)
+        self.last_timestamps[page_title] = date
 
-            timestamp = rev.get('timestamp')
-            if timestamp is None:
-                last_timestamp += timedelta(seconds=1)
-            else:
-                last_timestamp = datetime.fromisoformat(timestamp)
+        commit = Commit(
+            title=smudge_filename(page_title),
+            author=rev.get('user') or 'Anonymous',
+            comment=rev.get('comment') or EMPTY_MESSAGE,
+            content=content,
+            date=date,
+            mw_revision=rev['revid'],
+        )
 
-            commit = Commit(
-                title=smudge_filename(page_title),
-                author=rev.get('user') or 'Anonymous',
-                comment=rev.get('comment') or EMPTY_MESSAGE,
-                content=content,
-                date=last_timestamp,
-                mw_revision=rev['revid'],
-            )
-
-            # Differentiates classic pages and media files.
-            namespace, separator, filename = page_title.partition(':')
-            mediafile = None
-            if separator and namespace:
-                namespace_id = self.get_mw_namespace_id(namespace)
-                if namespace_id and namespace_id == self.get_mw_namespace_id('File'):
-                    mediafile = self.get_mw_mediafile_for_page_revision(filename, timestamp)
-            # If this is a revision of the media page for a new version of a
-            # file, do one common commit for both file and media page.
-            # Else do a commit only for that page.
-            logger.warning(f'{n}/{total}: Revision #{rev["revid"]} of {commit.title}')
-            self.import_file_revision(commit, fetch_from == 1, self.imported, mediafile)
+        # Differentiates classic pages and media files.
+        namespace, separator, filename = page_title.partition(':')
+        mediafile = None
+        if separator and namespace:
+            namespace_id = self.get_mw_namespace_id(namespace)
+            if namespace_id and namespace_id == self.get_mw_namespace_id('File'):
+                mediafile = self.get_mw_mediafile_for_page_revision(filename, timestamp)
+        # If this is a revision of the media page for a new version of a
+        # file, do one common commit for both file and media page.
+        # Else do a commit only for that page.
+        logger.warning(f'{n}/{total}: Revision #{rev["revid"]} of {commit.title}')
+        self.import_file_revision(commit, fetch_from == 1, self.imported, mediafile)
 
     #################################### push #################################
 

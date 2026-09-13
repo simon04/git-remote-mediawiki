@@ -1,5 +1,25 @@
 test_push_pull () {
 
+	test_expect_success 'Git push works when revisions of pages interleave' '
+		wiki_reset &&
+
+		# Interleave the revision ids across two pages, so that the newest
+		# revision on the wiki does not belong to whichever page the API
+		# returns last. The note on the last imported commit is what gates
+		# the next push, so it has to be that newest revision.
+		wiki_editpage Foo "first" false &&
+		wiki_editpage Bar "second" false &&
+		wiki_editpage Foo "third" false &&
+
+		git clone mediawiki::'"$WIKI_URL"' mw_dir_interleaved &&
+		(
+			cd mw_dir_interleaved &&
+			echo "a local change" >Foo.mw &&
+			git commit -am "a local change" &&
+			git push
+		)
+	'
+
 	test_expect_success 'Git pull works after adding a new wiki page' '
 		wiki_reset &&
 
@@ -123,7 +143,8 @@ test_push_pull () {
 			git add Foo.mw &&
 			git commit -m "conflict created" &&
 			test_must_fail git pull &&
-			python3 -c 'import re, sys; p = sys.argv[1]; open(p, "w").write(re.sub(r"[<=>].*", "", open(p).read()))' Foo.mw &&
+			sed "s/[<=>].*//" Foo.mw >Foo.mw.tmp &&
+			mv Foo.mw.tmp Foo.mw &&
 			git commit -am "merge conflict solved" &&
 			git push
 		)
