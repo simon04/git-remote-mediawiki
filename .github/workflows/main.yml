@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  ruff:
+  checks:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,3 +19,5 @@ jobs:
         run: uv run ruff check .
       - name: Format
         run: uv run ruff format --check .
+      - name: Type check
+        run: uv run ty check --extra-search-path .
