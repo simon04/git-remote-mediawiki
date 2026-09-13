@@ -80,18 +80,19 @@ def run_git(args, *, quiet=False):
     return run_git_bytes(args, quiet=quiet).decode('utf-8', 'replace')
 
 
-def git_config(name, boolean=False):
+def git_config(name):
     """Return the value of the ``name`` configuration variable, or ''."""
-    args = ['config', '--get']
-    if boolean:
-        args.append('--bool')
-    args.append(name)
-    return run_git(args, quiet=True).strip()
+    return run_git(['config', '--get', name], quiet=True).strip()
 
 
-def git_config_bool(name):
-    """Return the ``name`` configuration variable as a boolean."""
-    return git_config(name, boolean=True) == 'true'
+def git_config_bool(name, default=False):
+    """Return the ``name`` configuration variable as a boolean.
+
+    ``default`` is what an unset variable means, so a setting that is on
+    unless it is explicitly turned off reads as ``default=True``.
+    """
+    value = run_git(['config', '--get', '--bool', name], quiet=True).strip()
+    return default if not value else value == 'true'
 
 
 def git_config_all(name):

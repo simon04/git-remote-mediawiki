@@ -127,9 +127,9 @@ class GitRemoteMediaWiki:
 
         # Import media files on pull
         self.import_media = git_config_bool(f'remote.{remotename}.mediaimport')
-        # Export media files on push
-        self.export_media = (
-            git_config(f'remote.{remotename}.mediaexport', boolean=True) != 'false'
+        # Export media files on push, unless explicitly turned off
+        self.export_media = git_config_bool(
+            f'remote.{remotename}.mediaexport', default=True
         )
 
         # Import only last revisions (both for clone and fetch)
@@ -854,8 +854,7 @@ class GitRemoteMediaWiki:
 
     @staticmethod
     def error_non_fast_forward(remote):
-        advice = run_git(['config', '--bool', 'advice.pushNonFastForward'], quiet=True).strip()
-        if advice != 'false':
+        if git_config_bool('advice.pushNonFastForward', default=True):
             # Native git-push would show this after the summary. We can't ask
             # it to display it cleanly, so print it ourselves before.
             warn('To prevent you from losing history, non-fast-forward updates were rejected')
