@@ -1180,9 +1180,12 @@ def main(argv):
     if len(argv) != 2:
         exit_error_usage()
 
-    # By default, use UTF-8 to communicate with Git and the user
-    sys.stdin.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
+    # By default, use UTF-8 to communicate with Git and the user. Pass the
+    # error handlers explicitly, because reconfigure() resets them to 'strict':
+    # a ref name is an arbitrary byte string, which surrogateescape round-trips
+    # back to git intact, and a diagnostic must never be able to abort a push.
+    sys.stdin.reconfigure(encoding='utf-8', errors='surrogateescape')
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
 
     helper = GitRemoteMediaWiki(argv[0], argv[1])
 
