@@ -13,6 +13,7 @@
 # Documentation & bugtracker: https://github.com/Git-Mediawiki/Git-Mediawiki
 
 import argparse
+import logging
 import re
 import subprocess
 import sys
@@ -33,17 +34,10 @@ from git_mediawiki import (
     connect,
     git_config,
     run_git,
-    warn,
 )
 
-# Global parameters
-verbose = False
-
-
-def v_print(text):
-    """Print ``text`` on stderr, but only in verbose mode."""
-    if verbose:
-        warn(text, end='')
+# Progress traces are logged at DEBUG, so -v is what turns them on.
+logger = logging.getLogger('git-mw')
 
 
 ############################# HTML manipulation ################################
@@ -152,18 +146,19 @@ def merge_contents(template, content, remote_url, remote_name):
     template_content_id = (
         git_config(f'remote.{remote_name}.mwIDcontent') or 'bodyContent'
     )
-    v_print(f"Using '{template_content_id}' as the content ID\n")
+    logger.debug("Using '%s' as the content ID", template_content_id)
 
     merger = TemplateMerger(content, template_content_id, remote_url)
     merger.feed(template)
     merger.close()
 
     if not merger.found:
-        warn(
+        logger.error(
             'Could not combine the new content with the template. You might want to\n'
             'configure `mediawiki.IDContent` in your config:\n'
-            f'\tgit config --add remote.{remote_name}.mwIDcontent <id>\n'
+            '\tgit config --add remote.%s.mwIDcontent <id>\n'
             'and re-run the command afterward.',
+            remote_name,
         )
         raise SystemExit(1)
 
@@ -215,10 +210,11 @@ def get_template(wiki, url, page_name):
     if code != HTTP_CODE_PAGE_NOT_FOUND:
         raise SystemExit(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
 
-    v_print(
-        f"Warning: Failed to retrieve '{page_name}'. Create it on the mediawiki if you want\n"
+    logger.debug(
+        "Warning: Failed to retrieve '%s'. Create it on the mediawiki if you want\n"
         'all the links to work properly.\n'
-        'Trying to use the mediawiki homepage as a fallback template ...\n'
+        'Trying to use the mediawiki homepage as a fallback template ...',
+        page_name,
     )
     # requests automatically redirects GET requests
     response = wiki.session.get(f'{url}/index.php')
@@ -244,13 +240,14 @@ def select_remote(remote_name):
 
     valid_remotes = find_mediawiki_remotes()
     if not valid_remotes:
-        warn('No mediawiki remote in this repo.')
+        logger.error('No mediawiki remote in this repo.')
     else:
         remotes_list = '\n\t'.join(valid_remotes)
-        warn(
+        logger.error(
             'There are multiple mediawiki remotes, which of:\n'
-            f'\t{remotes_list}\n'
+            '\t%s\n'
             'do you want ? Use the -r option to specify the remote.',
+            remotes_list,
         )
     raise SystemExit(1)
 
@@ -272,9 +269,9 @@ def preview(args):
     if not args.file:
         raise SystemExit('Missing file argument, see `git mw help`')
 
-    v_print('### Selecting remote\n')
+    logger.debug('### Selecting remote')
     remote_name, remote_url = select_remote(args.remote)
-    v_print(f'selected remote:\n\tname: {remote_name}\n\turl: {remote_url}\n')
+    logger.debug('selected remote:\n\tname: %s\n\turl: %s', remote_name, remote_url)
 
     try:
         wiki = connect(remote_name, remote_url)
@@ -283,18 +280,18 @@ def preview(args):
 
     file_content, file_name = read_file_content(args.file)
 
-    v_print('### Retrieving template\n')
+    logger.debug('### Retrieving template')
     wiki_page_name = re.sub(r'\.[^.]+$', '', clean_filename(file_name))
     template = get_template(wiki, remote_url, wiki_page_name)
 
-    v_print('### Parsing local content\n')
+    logger.debug('### Parsing local content')
     try:
         parsed = wiki.api('parse', text=file_content, title=wiki_page_name)
     except WIKI_ERRORS as error:
         raise SystemExit(f'No response from remote mediawiki: {error}') from error
     new_content = parsed['parse']['text']['*']
 
-    v_print('### Merging contents\n')
+    logger.debug('### Merging contents')
     preview_file_name = args.output
     if not preview_file_name:
         preview_file_name = re.sub(r'\.[^.]+$', '.html', file_name)
@@ -303,12 +300,12 @@ def preview(args):
         encoding='utf-8',
     )
 
-    v_print('### Results\n')
+    logger.debug('### Results')
     if args.autoload:
-        v_print(f'Launching browser w/ file: {preview_file_name}')
+        logger.debug('Launching browser w/ file: %s', preview_file_name)
         subprocess.run(['git', 'web--browse', preview_file_name], check=False)
     else:
-        warn(f'Preview file saved as: {preview_file_name}')
+        logger.info('Preview file saved as: %s', preview_file_name)
 
 
 ############################### Help Functions ################################
@@ -391,8 +388,6 @@ def build_parser(command):
 
 
 def main(argv):
-    global verbose
-
     # By default, use UTF-8 to communicate with Git and the user
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
@@ -409,7 +404,10 @@ def main(argv):
             break
 
     args = build_parser(command).parse_args(argv)
-    verbose = args.verbose
+    # Leave the root logger at INFO so that -v does not also switch on the
+    # debug output of urllib3 and friends; only our own traces are verbose.
+    logging.basicConfig(format='%(message)s', level=logging.INFO)
+    logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     if args.help:
         preview_help() if command == 'preview' else help_command()
