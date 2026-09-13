@@ -2,13 +2,14 @@ Testing git-remote-mediawiki
 ============================
 
 The tests are Python, and run against a MediaWiki that lives inside the test
-process. They need no web server, no PHP and no MediaWiki install:
-
-	make test
-
-or, from the top of the repository,
+process. They need no web server, no PHP and no MediaWiki install. From the
+top of the repository:
 
 	python3 -m unittest discover --start-directory t --verbose
+
+or from here:
+
+	python3 -m unittest discover --verbose
 
 How they work
 -------------
