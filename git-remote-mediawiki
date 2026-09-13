@@ -264,15 +264,21 @@ class GitRemoteMediaWiki:
 
     ################ Functions for listing pages on the remote wiki ###########
 
-    def get_mw_tracked_pages(self, pages):
-        self.get_mw_page_list(self.tracked_pages, pages)
+    def get_mw_tracked_pages(self):
+        """Return the pages the user asked to track, keyed by title."""
+        return self.get_mw_page_list(self.tracked_pages)
 
-    def get_mw_page_list(self, page_list, pages):
+    def get_mw_page_list(self, page_list):
+        """Return the named pages, queried in slices, keyed by title."""
+        pages = {}
         for start in range(0, len(page_list), SLICE_SIZE):
-            self.get_mw_first_pages(page_list[start : start + SLICE_SIZE], pages)
+            pages |= self.get_mw_first_pages(page_list[start : start + SLICE_SIZE])
+        return pages
 
-    def get_mw_tracked_categories(self, pages):
+    def get_mw_tracked_categories(self):
+        """Return the pages of the tracked categories, keyed by title."""
         wiki = self.connect()
+        pages = {}
         for category in self.tracked_categories:
             if ':' not in category:
                 # Mediawiki requires the Category prefix, but let's not force
@@ -284,11 +290,13 @@ class GitRemoteMediaWiki:
                 )
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
-            for page in mw_pages:
-                pages[page['title']] = page
+            pages |= {page['title']: page for page in mw_pages}
+        return pages
 
-    def get_mw_tracked_namespaces(self, pages):
+    def get_mw_tracked_namespaces(self):
+        """Return the pages of the tracked namespaces, keyed by title."""
         wiki = self.connect()
+        pages = {}
         for local_namespace in sorted(self.tracked_namespaces):
             if local_namespace == '(Main)':
                 namespace_id = 0
@@ -304,21 +312,21 @@ class GitRemoteMediaWiki:
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
             warn(f'{len(mw_pages)} found in namespace {local_namespace} ({namespace_id})')
-            for page in mw_pages:
-                pages[page['title']] = page
+            pages |= {page['title']: page for page in mw_pages}
+        return pages
 
-    def get_mw_all_pages(self, pages):
+    def get_mw_all_pages(self):
+        """Return every page of the wiki, keyed by title."""
         # No user-provided list, get the list of pages from the API.
         wiki = self.connect()
         try:
             mw_pages = wiki.query_list('allpages', aplimit='max')
         except WIKI_ERRORS as error:
             self.fatal_mw_error('get the list of wiki pages', error)
-        for page in mw_pages:
-            pages[page['title']] = page
+        return {page['title']: page for page in mw_pages}
 
-    def get_mw_first_pages(self, some_pages, pages):
-        """Query the wiki for a slice of the page list."""
+    def get_mw_first_pages(self, some_pages):
+        """Query the wiki for a slice of the page list, keyed by title."""
         wiki = self.connect()
         # pattern 'page1|page2|...' required by the API
         titles = '|'.join(some_pages)
@@ -326,11 +334,14 @@ class GitRemoteMediaWiki:
             mw_pages = wiki.query(titles=titles)
         except WIKI_ERRORS as error:
             self.fatal_mw_error('query the list of wiki pages', error)
+
+        pages = {}
         for page_id, page in mw_pages.get('query', {}).get('pages', {}).items():
             if int(page_id) < 0:
                 warn(f'Warning: page {page["title"]} not found on wiki')
             else:
                 pages[page['title']] = page
+        return pages
 
     def get_mw_pages(self):
         """Get the list of pages to be fetched according to configuration."""
@@ -338,31 +349,35 @@ class GitRemoteMediaWiki:
 
         warn('Listing pages on remote wiki...')
 
+        user_defined = bool(
+            self.tracked_pages or self.tracked_categories or self.tracked_namespaces
+        )
+
         pages = {}  # keyed on page titles to avoid duplicates
-        user_defined = False
         if self.tracked_pages:
-            user_defined = True
             # The user provided a list of pages titles, but we still need to
             # query the API to get the page IDs.
-            self.get_mw_tracked_pages(pages)
+            pages |= self.get_mw_tracked_pages()
         if self.tracked_categories:
-            user_defined = True
-            self.get_mw_tracked_categories(pages)
+            pages |= self.get_mw_tracked_categories()
         if self.tracked_namespaces:
-            user_defined = True
-            self.get_mw_tracked_namespaces(pages)
+            pages |= self.get_mw_tracked_namespaces()
         if not user_defined:
-            self.get_mw_all_pages(pages)
+            pages |= self.get_mw_all_pages()
+
         if self.import_media:
             warn('Getting media files for selected pages...')
-            if user_defined:
+            pages |= (
                 self.get_linked_mediafiles(pages)
-            else:
-                self.get_all_mediafiles(pages)
+                if user_defined
+                else self.get_all_mediafiles()
+            )
+
         warn(f'{len(pages)} pages found.')
         return pages
 
-    def get_all_mediafiles(self, pages):
+    def get_all_mediafiles(self):
+        """Return every media file page of the wiki, keyed by title."""
         # Attach list of all pages for media files from the API, they are in a
         # different namespace, only one namespace can be queried at the same
         # moment
@@ -379,12 +394,13 @@ class GitRemoteMediaWiki:
             warn(f"fatal: make sure '{self.url}/api.php' is a valid page.")
             warn(f'fatal: (error {error})')
             raise SystemExit(1) from error
-        for page in mw_pages:
-            pages[page['title']] = page
+        return {page['title']: page for page in mw_pages}
 
     def get_linked_mediafiles(self, pages):
+        """Return the media files included or linked from ``pages``."""
         wiki = self.connect()
         titles = [page['title'] for page in pages.values()]
+        mediafiles = {}
 
         for start in range(0, len(titles), BATCH_SIZE):
             # pattern 'page1|page2|...' required by the API
@@ -403,7 +419,8 @@ class GitRemoteMediaWiki:
                 media_titles = [link['title'] for link in page.get('links', [])]
                 media_titles += [image['title'] for image in page.get('images', [])]
                 if media_titles:
-                    self.get_mw_page_list(media_titles, pages)
+                    mediafiles |= self.get_mw_page_list(media_titles)
+        return mediafiles
 
     def get_mw_mediafile_for_page_revision(self, filename, timestamp):
         """Download the media file version matching ``timestamp``, if any."""
