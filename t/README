@@ -51,8 +51,13 @@ the bridge is broken. Five such differences turned up while the shell tests
 were being ported, among them that MediaWiki trims trailing whitespace when
 it saves, which is what makes a page deleted through git stay deleted.
 
-`install-wiki.sh` stands up a real MediaWiki with lighttpd and PHP, and is
+`install_wiki.py` stands up a real MediaWiki with lighttpd and PHP, and is
 kept for that purpose:
 
-	./install-wiki.sh install     # configuration is in ./test.config
-	./install-wiki.sh delete
+	./install_wiki.py install
+	./install_wiki.py reset       # database back to just after installation
+	./install_wiki.py delete
+
+	./install_wiki.py --help      # port, version, administrator
+
+It is stdlib only, so it runs under plain python3 like the tests do.

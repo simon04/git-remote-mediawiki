@@ -24,5 +24,4 @@ jobs:
       - name: Test
         run: python3 -m unittest discover --start-directory t --verbose
       - name: Shell syntax
-        # sh -n takes one script; the rest would be its arguments, not checked.
-        run: for f in bin-wrapper/git t/*.sh; do sh -n "$f" || exit 1; done
+        run: sh -n bin-wrapper/git

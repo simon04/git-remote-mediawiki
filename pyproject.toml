@@ -54,4 +54,5 @@ include = [
     "t/test_clone.py",
     "t/test_export_import.py",
     "t/test_utf8.py",
+    "t/install_wiki.py",
 ]
