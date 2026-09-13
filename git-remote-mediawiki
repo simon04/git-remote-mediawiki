@@ -1210,12 +1210,26 @@ class GitRemoteMediaWiki:
 
 def exit_error_usage() -> NoReturn:
     raise SystemExit(
-        'ERROR: git-remote-mediawiki module was not called with a correct number of\n'
-        'parameters\n'
-        'You may obtain this error because you attempted to run the git-remote-mediawiki\n'
-        'module directly.\n'
-        'This module can be used the following way:\n'
-        '\tgit clone mediawiki://<address of a mediawiki>\n'
+        'ERROR: git-remote-mediawiki was not called with a correct number of\n'
+        'parameters.\n'
+        '\n'
+        'You may obtain this error because you attempted to run the\n'
+        'git-remote-mediawiki module directly. It is a Git remote helper, which\n'
+        'Git runs for you when a remote URL begins with "mediawiki::" followed by\n'
+        'the address of the wiki, the one holding api.php:\n'
+        '\n'
+        '\tgit clone mediawiki::https://en.wikipedia.org/w wikipedia\n'
+        '\n'
+        'That clones every page of the wiki, which for Wikipedia is millions of\n'
+        'them. To track only some, list them in remote.<name>.pages. Values are\n'
+        'separated by whitespace, so write the spaces in a title as underscores:\n'
+        '\n'
+        '\tgit clone -c remote.origin.pages="Git Linux_kernel" \\\n'
+        '\t\tmediawiki::https://en.wikipedia.org/w wikipedia\n'
+        '\n'
+        'remote.<name>.categories and remote.<name>.namespaces select pages the\n'
+        'same way, by category membership and by namespace.\n'
+        '\n'
         'Then, use git commit, push and pull as with every normal git repository.'
     )
 
