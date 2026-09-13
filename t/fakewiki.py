@@ -174,6 +174,11 @@ class FakeWiki:
             text = page.text + text
         if category is not None:
             text = f'{text}\n [[Category:{category}]]'
+        # MediaWiki trims trailing whitespace when it saves wikitext. The
+        # bridge relies on it: a page it 'deletes' is stored as
+        # [[Category:Deleted]] with no trailing newline, which is how the next
+        # import recognises it and removes the file again.
+        text = text.rstrip()
         revid = self.next_revid
         self.next_revid += 1
         page.revisions.append(

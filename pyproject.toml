@@ -54,4 +54,5 @@ include = [
     "t/test_continuing_queries.py",
     "t/test_push_pull.py",
     "t/test_clone.py",
+    "t/test_export_import.py",
 ]
