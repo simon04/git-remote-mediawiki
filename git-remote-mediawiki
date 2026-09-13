@@ -79,16 +79,16 @@ def is_null_sha1(sha1):
 ############################ fast-import output ###############################
 
 
-def emit(text):
-    """Write ``text`` to the fast-import stream, encoded as UTF-8."""
-    sys.stdout.buffer.write(text.encode('utf-8'))
-
-
 def literal_data(content):
-    """Emit a fast-import ``data`` command; binary content is passed as bytes."""
+    """Emit a fast-import ``data`` command; binary content is passed as bytes.
+
+    ``data <n>`` counts bytes, not characters, so text is encoded here purely
+    to measure it -- and those same bytes are then what gets written, so the
+    count and the payload cannot drift apart.
+    """
     if isinstance(content, str):
         content = content.encode('utf-8')
-    sys.stdout.buffer.write(b'data %d\n' % len(content))
+    sys.stdout.write(f'data {len(content)}\n')
     sys.stdout.buffer.write(content)
 
 
@@ -579,24 +579,24 @@ class GitRemoteMediaWiki:
         # Revisions are imported to the private namespace
         # refs/mediawiki/$remotename/ by the helper and fetched into
         # refs/remotes/$remotename later by fetch.
-        emit(f'refspec refs/heads/*:refs/mediawiki/{self.remotename}/*\n')
-        emit('import\n')
-        emit('list\n')
-        emit('push\n')
+        sys.stdout.write(f'refspec refs/heads/*:refs/mediawiki/{self.remotename}/*\n')
+        sys.stdout.write('import\n')
+        sys.stdout.write('list\n')
+        sys.stdout.write('push\n')
         if self.dumb_push:
-            emit('no-private-update\n')
-        emit('\n')
+            sys.stdout.write('no-private-update\n')
+        sys.stdout.write('\n')
 
     def mw_list(self, for_push=None):
         # MediaWiki does not have branches, we consider one branch arbitrarily
         # called master, and HEAD pointing to it.
-        emit('? refs/heads/master\n')
-        emit('@refs/heads/master HEAD\n')
-        emit('\n')
+        sys.stdout.write('? refs/heads/master\n')
+        sys.stdout.write('@refs/heads/master HEAD\n')
+        sys.stdout.write('\n')
 
     def mw_option(self, name, value):
         warn(f"remote-helper command 'option {name}' not yet implemented")
-        emit('unsupported\n')
+        sys.stdout.write('unsupported\n')
 
     ################################### import ################################
 
@@ -662,35 +662,35 @@ class GitRemoteMediaWiki:
         date = commit['date']
         epoch = int(date.timestamp())
 
-        emit(f'commit refs/mediawiki/{self.remotename}/master\n')
-        emit(f'mark :{n}\n')
-        emit(f'committer {author} <{author}@{self.wiki_name}> {epoch} +0000\n')
+        sys.stdout.write(f'commit refs/mediawiki/{self.remotename}/master\n')
+        sys.stdout.write(f'mark :{n}\n')
+        sys.stdout.write(f'committer {author} <{author}@{self.wiki_name}> {epoch} +0000\n')
         literal_data(comment)
 
         # If it's not a clone, we need to know where to start from
         if not full_import and n == 1:
-            emit(f'from refs/mediawiki/{self.remotename}/master^0\n')
+            sys.stdout.write(f'from refs/mediawiki/{self.remotename}/master^0\n')
         if content != DELETED_CONTENT:
-            emit(f'M 644 inline {fe_escape_path(f"{title}.mw")}\n')
+            sys.stdout.write(f'M 644 inline {fe_escape_path(f"{title}.mw")}\n')
             literal_data(content)
             if mediafile:
-                emit(f'M 644 inline {fe_escape_path(mediafile["title"])}\n')
+                sys.stdout.write(f'M 644 inline {fe_escape_path(mediafile["title"])}\n')
                 literal_data(mediafile['content'])
-            emit('\n\n')
+            sys.stdout.write('\n\n')
         else:
-            emit(f'D {fe_escape_path(f"{title}.mw")}\n')
+            sys.stdout.write(f'D {fe_escape_path(f"{title}.mw")}\n')
 
         # mediawiki revision number in the git note
         if full_import and n == 1:
-            emit(f'reset refs/notes/{self.remotename}/mediawiki\n')
-        emit(f'commit refs/notes/{self.remotename}/mediawiki\n')
-        emit(f'committer {author} <{author}@{self.wiki_name}> {epoch} +0000\n')
+            sys.stdout.write(f'reset refs/notes/{self.remotename}/mediawiki\n')
+        sys.stdout.write(f'commit refs/notes/{self.remotename}/mediawiki\n')
+        sys.stdout.write(f'committer {author} <{author}@{self.wiki_name}> {epoch} +0000\n')
         literal_data('Note added by git-mediawiki during import')
         if not full_import and n == 1:
-            emit(f'from refs/notes/{self.remotename}/mediawiki^0\n')
-        emit(f'N inline :{n}\n')
+            sys.stdout.write(f'from refs/notes/{self.remotename}/mediawiki^0\n')
+        sys.stdout.write(f'N inline :{n}\n')
         literal_data(f'mediawiki_revision: {commit["mw_revision"]}')
-        emit('\n\n')
+        sys.stdout.write('\n\n')
 
     @staticmethod
     def get_more_refs(cmd):
@@ -716,7 +716,7 @@ class GitRemoteMediaWiki:
                 continue
             processed_refs.add(one_ref)
             self.mw_import_ref(one_ref)
-        emit('done\n')
+        sys.stdout.write('done\n')
 
     def mw_import_ref(self, ref):
         # The remote helper will call "import HEAD" and
@@ -867,7 +867,7 @@ class GitRemoteMediaWiki:
             warn('To prevent you from losing history, non-fast-forward updates were rejected')
             warn("Merge the remote changes (e.g. 'git pull') before pushing again. See the")
             warn("'Note about fast-forwards' section of 'git push --help' for details.")
-        emit(f'error {remote} "non-fast-forward"\n')
+        sys.stdout.write(f'error {remote} "non-fast-forward"\n')
         return False
 
     def mw_upload_file(self, complete_file_name, new_sha1, extension, file_deleted, summary):
@@ -991,17 +991,17 @@ class GitRemoteMediaWiki:
                 warn('Warning: forced push not allowed on a MediaWiki.')
             if not local:
                 warn('Cannot delete remote branch on a MediaWiki')
-                emit(f'error {remote} cannot delete\n')
+                sys.stdout.write(f'error {remote} cannot delete\n')
                 continue
             if remote != 'refs/heads/master':
                 warn("Only push to the branch 'master' is supported on a MediaWiki")
-                emit(f'error {remote} only master allowed\n')
+                sys.stdout.write(f'error {remote} only master allowed\n')
                 continue
             if self.mw_push_revision(local, remote):
                 pushed = True
 
         # Notify Git that the push is done
-        emit('\n')
+        sys.stdout.write('\n')
 
         if pushed and self.dumb_push:
             warn('Just pushed some revisions to MediaWiki.')
@@ -1103,7 +1103,7 @@ class GitRemoteMediaWiki:
                     ]
                 )
 
-        emit(f'ok {remote}\n')
+        sys.stdout.write(f'ok {remote}\n')
         return True
 
     ################################## namespaces #############################
@@ -1186,6 +1186,13 @@ def main(argv):
     # back to git intact, and a diagnostic must never be able to abort a push.
     sys.stdin.reconfigure(encoding='utf-8', errors='surrogateescape')
     sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    # stdout carries the fast-import stream: pin it to UTF-8 with LF endings
+    # whatever the locale and platform say, since the byte counts written by
+    # literal_data() have to match. write_through keeps this text layer from
+    # buffering ahead of the raw bytes literal_data() writes underneath it.
+    sys.stdout.reconfigure(
+        encoding='utf-8', errors='strict', newline='\n', write_through=True
+    )
 
     helper = GitRemoteMediaWiki(argv[0], argv[1])
 
@@ -1197,7 +1204,7 @@ def main(argv):
         if not helper.parse_command(line.rstrip('\n')):
             break
         # flush stdout, to make sure the previous command is fully processed.
-        sys.stdout.buffer.flush()
+        sys.stdout.flush()
 
 
 if __name__ == '__main__':
