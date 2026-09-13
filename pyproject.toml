@@ -52,4 +52,5 @@ include = [
     "t/fakewiki.py",
     "t/gitmwtest.py",
     "t/test_continuing_queries.py",
+    "t/test_push_pull.py",
 ]

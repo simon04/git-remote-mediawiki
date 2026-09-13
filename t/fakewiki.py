@@ -28,6 +28,9 @@ NAMESPACES = {
     'Category': 14,
 }
 
+# What a freshly installed MediaWiki puts on its Main Page.
+MAIN_PAGE = "'''MediaWiki has been installed.'''"
+
 # What this wiki claims to accept as an upload.
 FILE_EXTENSIONS = ['txt', 'png', 'jpg', 'gif', 'svg']
 
@@ -129,13 +132,20 @@ class FakeWiki:
     ########################### contents, for tests #######################
 
     def reset(self) -> None:
-        """Empty the wiki, as wiki_reset did by restoring a database dump."""
+        """Return the wiki to a freshly installed state.
+
+        That is not an empty wiki: a new MediaWiki has a Main Page, which is
+        why cloning one works at all. The bridge cannot clone a wiki with no
+        pages, since fast-import is then given nothing and git has no ref to
+        check out.
+        """
         self.pages.clear()
         self.next_pageid = 1
         self.next_revid = 1
         self.logged_in = False
         self.unhandled.clear()
         self.requests = 0
+        self.edit_page('Main Page', MAIN_PAGE, user='MediaWiki default')
 
     def page(self, title: str) -> Page | None:
         title = normalise_title(title)

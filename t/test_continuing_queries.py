@@ -12,14 +12,13 @@ class ContinuingQueriesTest(GitMediaWikiTestCase):
     def test_clones_a_page_with_more_than_500_revisions(self) -> None:
         for number in range(1, 502):
             self.wiki.edit_page('foo', f'revision {number}<br/>', append=True)
-        page = self.wiki.page('foo')
-        assert page is not None
-        self.assertEqual(501, len(page.revisions))
+        self.assertEqual(501, len(self.wiki_page('foo').revisions))
 
         repository = self.clone()
 
-        self.assertEqual(['Foo.mw'], self.page_files(repository))
-        self.assertEqual(501, int(self.git('rev-list', '--count', 'HEAD', cwd=repository).stdout))
+        # Plus the Main Page every fresh MediaWiki starts with.
+        self.assertEqual(['Foo.mw', 'Main_Page.mw'], self.page_files(repository))
+        self.assertEqual(502, int(self.git('rev-list', '--count', 'HEAD', cwd=repository).stdout))
         self.assertNothingUnhandled()
 
     def test_clones_a_wiki_with_more_than_500_pages(self) -> None:
@@ -28,7 +27,7 @@ class ContinuingQueriesTest(GitMediaWikiTestCase):
 
         repository = self.clone()
 
-        self.assertEqual(501, len(self.page_files(repository)))
+        self.assertEqual(502, len(self.page_files(repository)))  # plus the Main Page
         self.assertNothingUnhandled()
 
 
