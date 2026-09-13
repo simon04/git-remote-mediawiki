@@ -20,6 +20,7 @@ import itertools
 import logging
 import re
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import cached_property
 from pathlib import Path
@@ -70,6 +71,48 @@ BATCH_SIZE = 10
 # FIXME: Need to fetch max_revs per-repo in case they have a client
 # that can fetch more on a wiki
 MAX_REVS = 50
+
+
+@dataclass(frozen=True, slots=True)
+class Page:
+    """A wiki page the bridge tracks.
+
+    The API returns a good deal more than this; these are the two fields the
+    bridge actually uses, and pinning them down keeps the shape of a "page"
+    from depending on which query happened to produce it.
+    """
+
+    pageid: int
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class MediaFile:
+    """One version of a media file, downloaded to go with its page revision."""
+
+    title: str
+    content: bytes
+    timestamp: str
+
+
+@dataclass(frozen=True, slots=True)
+class Commit:
+    """A MediaWiki revision, ready to be written to the fast-import stream."""
+
+    title: str
+    author: str
+    comment: str
+    content: str
+    date: datetime
+    mw_revision: int
+
+
+def pages_by_title(api_pages):
+    """Index API page records by title."""
+    return {
+        page['title']: Page(pageid=page['pageid'], title=page['title'])
+        for page in api_pages
+    }
 
 
 def is_null_sha1(sha1):
@@ -308,7 +351,7 @@ class GitRemoteMediaWiki:
                 )
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
-            pages |= {page['title']: page for page in mw_pages}
+            pages |= pages_by_title(mw_pages)
         return pages
 
     def get_mw_tracked_namespaces(self):
@@ -329,7 +372,7 @@ class GitRemoteMediaWiki:
             except WIKI_ERRORS as error:
                 raise SystemExit(error) from error
             logger.warning(f'{len(mw_pages)} found in namespace {local_namespace} ({namespace_id})')
-            pages |= {page['title']: page for page in mw_pages}
+            pages |= pages_by_title(mw_pages)
         return pages
 
     def get_mw_all_pages(self):
@@ -339,7 +382,7 @@ class GitRemoteMediaWiki:
             mw_pages = self.wiki.query_list('allpages', aplimit='max')
         except WIKI_ERRORS as error:
             self.fatal_mw_error('get the list of wiki pages', error)
-        return {page['title']: page for page in mw_pages}
+        return pages_by_title(mw_pages)
 
     def get_mw_first_pages(self, some_pages):
         """Query the wiki for a slice of the page list, keyed by title."""
@@ -355,7 +398,7 @@ class GitRemoteMediaWiki:
             if int(page_id) < 0:
                 logger.warning(f'Warning: page {page["title"]} not found on wiki')
             else:
-                pages[page['title']] = page
+                pages[page['title']] = Page(pageid=page['pageid'], title=page['title'])
         return pages
 
     def get_mw_pages(self):
@@ -408,11 +451,11 @@ class GitRemoteMediaWiki:
             logger.warning(f"fatal: make sure '{self.url}/api.php' is a valid page.")
             logger.warning(f'fatal: (error {error})')
             raise SystemExit(1) from error
-        return {page['title']: page for page in mw_pages}
+        return pages_by_title(mw_pages)
 
     def get_linked_mediafiles(self, pages):
         """Return the media files included or linked from ``pages``."""
-        titles = [page['title'] for page in pages.values()]
+        titles = [page.title for page in pages.values()]
         mediafiles = {}
 
         for batch in itertools.batched(titles, BATCH_SIZE, strict=False):
@@ -438,7 +481,7 @@ class GitRemoteMediaWiki:
     def get_mw_mediafile_for_page_revision(self, filename, timestamp):
         """Download the media file version matching ``timestamp``, if any."""
         if timestamp is None:
-            return {}
+            return None
 
         # Search if a media file with the given timestamp exists on MediaWiki.
         # In that case download the file.
@@ -453,25 +496,23 @@ class GitRemoteMediaWiki:
 
         pages = result.get('query', {}).get('pages', {})
         if not pages:
-            return {}
+            return None
         page = next(iter(pages.values()))
         # If there is no imageinfo it means there is no revision of the file
         # for the given timestamp.
         imageinfo = page.get('imageinfo')
         if not imageinfo:
-            return {}
+            return None
 
         fileinfo = imageinfo[-1]
         logger.warning(f'\tDownloading file {filename}, version {fileinfo["timestamp"]}')
         content = self.download_mw_mediafile(fileinfo['url'])
         if content is None:
             logger.warning(f'\tFAILED downloading {fileinfo["url"]}! Skipping!')
-            return {}
-        return {
-            'content': content,
-            'title': filename,
-            'timestamp': fileinfo['timestamp'],
-        }
+            return None
+        return MediaFile(
+            title=filename, content=content, timestamp=fileinfo['timestamp']
+        )
 
     def download_mw_mediafile(self, download_url):
         response = self.wiki.session.get(download_url)
@@ -539,7 +580,7 @@ class GitRemoteMediaWiki:
         logger.warning('Getting last revision id on tracked pages...')
 
         for page in pages:
-            page_id = page['pageid']
+            page_id = page.pageid
             result = self.wiki.query(
                 prop='revisions', rvprop='ids|timestamp', pageids=page_id
             )
@@ -630,7 +671,7 @@ class GitRemoteMediaWiki:
             )
             for revision in revisions:
                 page_revs.append(
-                    {'pageid': page['pageid'], 'revid': revision['revid']}
+                    {'pageid': page.pageid, 'revid': revision['revid']}
                 )
 
             if 'query-continue' in result:  # For legacy APIs
@@ -650,20 +691,19 @@ class GitRemoteMediaWiki:
     def fetch_mw_revisions(self, pages, fetch_from):
         revisions = []
         for n, page in enumerate(pages, start=1):
-            logger.warning(f'page {n}/{len(pages)}: {page["title"]}')
+            logger.warning(f'page {n}/{len(pages)}: {page.title}')
             revisions = (
-                self.fetch_mw_revisions_for_page(page, page['pageid'], fetch_from)
+                self.fetch_mw_revisions_for_page(page, page.pageid, fetch_from)
                 + revisions
             )
         return revisions
 
     def import_file_revision(self, commit, full_import, n, mediafile=None):
-        title = commit['title']
-        comment = commit['comment']
-        content = commit['content']
-        author = commit['author']
-        date = commit['date']
-        epoch = int(date.timestamp())
+        title = commit.title
+        comment = commit.comment
+        content = commit.content
+        author = commit.author
+        epoch = int(commit.date.timestamp())
 
         sys.stdout.write(f'commit refs/mediawiki/{self.remotename}/master\n')
         sys.stdout.write(f'mark :{n}\n')
@@ -676,9 +716,9 @@ class GitRemoteMediaWiki:
         if content != DELETED_CONTENT:
             sys.stdout.write(f'M 644 inline {fe_escape_path(f"{title}.mw")}\n')
             literal_data(content)
-            if mediafile:
-                sys.stdout.write(f'M 644 inline {fe_escape_path(mediafile["title"])}\n')
-                literal_data(mediafile['content'])
+            if mediafile is not None:
+                sys.stdout.write(f'M 644 inline {fe_escape_path(mediafile.title)}\n')
+                literal_data(mediafile.content)
             sys.stdout.write('\n\n')
         else:
             sys.stdout.write(f'D {fe_escape_path(f"{title}.mw")}\n')
@@ -692,7 +732,7 @@ class GitRemoteMediaWiki:
         if not full_import and n == 1:
             sys.stdout.write(f'from refs/notes/{self.remotename}/mediawiki^0\n')
         sys.stdout.write(f'N inline :{n}\n')
-        literal_data(f'mediawiki_revision: {commit["mw_revision"]}')
+        literal_data(f'mediawiki_revision: {commit.mw_revision}')
         sys.stdout.write('\n\n')
 
     @staticmethod
@@ -832,18 +872,18 @@ class GitRemoteMediaWiki:
             else:
                 last_timestamp = datetime.fromisoformat(timestamp)
 
-            commit = {
-                'author': rev.get('user') or 'Anonymous',
-                'comment': rev.get('comment') or EMPTY_MESSAGE,
-                'title': smudge_filename(page_title),
-                'mw_revision': rev['revid'],
-                'content': content,
-                'date': last_timestamp,
-            }
+            commit = Commit(
+                title=smudge_filename(page_title),
+                author=rev.get('user') or 'Anonymous',
+                comment=rev.get('comment') or EMPTY_MESSAGE,
+                content=content,
+                date=last_timestamp,
+                mw_revision=rev['revid'],
+            )
 
             # Differentiates classic pages and media files.
             namespace, separator, filename = page_title.partition(':')
-            mediafile = {}
+            mediafile = None
             if separator and namespace:
                 namespace_id = self.get_mw_namespace_id(namespace)
                 if namespace_id and namespace_id == self.get_mw_namespace_id('File'):
@@ -853,7 +893,7 @@ class GitRemoteMediaWiki:
             # If this is a revision of the media page for a new version of a
             # file, do one common commit for both file and media page.
             # Else do a commit only for that page.
-            logger.warning(f'{n}/{total}: Revision #{rev["revid"]} of {commit["title"]}')
+            logger.warning(f'{n}/{total}: Revision #{rev["revid"]} of {commit.title}')
             self.import_file_revision(
                 commit, fetch_from == 1, self.imported, mediafile
             )
