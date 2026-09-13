@@ -22,8 +22,9 @@ REPO_ROOT = WRAPPER_DIR.parent
 def real_git() -> str:
     """The git to hand over to.
 
-    WRAPPER_DIR is skipped: what is in it is this script, and finding
-    ourselves would mean running in a circle.
+    WRAPPER_DIR is skipped. Putting it on PATH is what a directory called
+    bin-wrapper is for, and the git in it is this script: found there, it
+    would exec itself for ever, there being no stack to run out of.
     """
     exec_path = os.environ.get('GIT_EXEC_PATH')
     if exec_path:
