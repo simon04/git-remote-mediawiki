@@ -68,6 +68,7 @@ Note that Git-Mediawiki is currently looking for a new maintainer, see issue [#3
 ## Links
 
 * [User manual](docs/User-manual.md)
+* [Using Git-Mediawiki with Wikipedia](docs/Wikipedia.md)
 * [Bug tracking](https://github.com/Git-Mediawiki/Git-Mediawiki/issues)
 * [Implementation documentation](docs/Implementation-documentation.md)
    * [Remote helpers](docs/Remote-Helpers.md)

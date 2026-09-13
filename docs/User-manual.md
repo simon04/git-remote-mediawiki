@@ -107,6 +107,10 @@ Some wiki require login/password. You can specify a login and password using the
 
 If you wiki requires specifying a domain when logging in (if you use LDAP authentication for instance), then you can set `remote.origin.mwDomain` to the corresponding value.
 
+Rather than storing the password in `.git/config`, you can set only `remote.origin.mwLogin` and let Git ask for the password through `git credential`, which hands it to whichever credential helper you have configured.
+
+Wikimedia wikis, Wikipedia among them, will not accept a main-account password here at all; they need a bot password. See [Using Git-Mediawiki with Wikipedia](Wikipedia.md).
+
 ## Previewing changes
 
 (This is work in progress, you need to apply Benoit Person's patches to get this)
