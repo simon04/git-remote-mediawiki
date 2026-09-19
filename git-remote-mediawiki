@@ -143,6 +143,17 @@ def fe_escape_path(path: str) -> str:
     return f'"{path}"'
 
 
+def fe_escape_ident(name: str) -> str:
+    """Make ``name`` safe to use as the name and mailbox of a fast-import ident.
+
+    ``<`` and ``>`` delimit the mailbox, so a name containing either one makes
+    fast-import reject the whole commit -- and MediaWiki does hand out such
+    names: a revision imported from another wiki keeps its origin as a prefix,
+    as in "en>Groyn88".
+    """
+    return re.sub(r'[<>\n]', '_', name)
+
+
 class CommandError(Exception):
     """Raised when a remote-helper command line does not parse."""
 
@@ -728,7 +739,7 @@ class GitRemoteMediaWiki:
         title = commit.title
         comment = commit.comment
         content = commit.content
-        author = commit.author
+        author = fe_escape_ident(commit.author)
         epoch = int(commit.date.timestamp())
 
         sys.stdout.write(f'commit refs/mediawiki/{self.remotename}/master\n')

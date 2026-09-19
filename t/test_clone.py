@@ -19,6 +19,10 @@ class CloneTest(GitMediaWikiTestCase):
         """Commit subjects, newest first."""
         return self.git('log', '--format=%s', *args, cwd=repository).stdout.splitlines()
 
+    def committers(self, repository, *args: str) -> list[str]:
+        """Committer names, newest first."""
+        return self.git('log', '--format=%cn', *args, cwd=repository).stdout.splitlines()
+
     def test_log_holds_the_edit_summary(self) -> None:
         self.wiki.edit_page('foo', 'this is not important', summary='this must be the same')
 
@@ -48,6 +52,22 @@ class CloneTest(GitMediaWikiTestCase):
             self.log(repository, 'Daddy.mw'),
         )
         self.assertEqual(['identical too', 'identical'], self.log(repository, 'Dj.mw'))
+
+    def test_the_wiki_user_becomes_the_committer(self) -> None:
+        self.wiki.edit_page('foo', 'this is not important', user='Groyn88')
+
+        repository = self.clone()
+
+        self.assertEqual(['Groyn88'], self.committers(repository, 'HEAD^..HEAD'))
+
+    def test_a_user_imported_from_another_wiki_still_makes_a_committer(self) -> None:
+        # Such a user keeps the wiki they came from as a prefix, and the '>'
+        # would otherwise close fast-import's ident before it opened.
+        self.wiki.edit_page('foo', 'this is not important', user='en>Groyn88')
+
+        repository = self.clone()
+
+        self.assertEqual(['en_Groyn88'], self.committers(repository, 'HEAD^..HEAD'))
 
     def test_a_fresh_wiki_gives_only_the_main_page(self) -> None:
         repository = self.clone()
