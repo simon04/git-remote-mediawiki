@@ -37,11 +37,13 @@ from git_mediawiki import (
     HTTP_CODE_PAGE_NOT_FOUND,
     WIKI_ERRORS,
     MediaWiki,
+    _,
     clean_filename,
     connect,
     git_config,
     git_credential,
     logger,
+    ngettext,
     run_git,
 )
 
@@ -174,10 +176,12 @@ class TemplateMerger(HTMLParser):
 
         if not merger.found:
             logger.error(
-                'Could not combine the new content with the template. You might want to\n'
-                'configure `mediawiki.IDContent` in your config:\n'
-                '\tgit config --add remote.%s.mwIDcontent <id>\n'
-                'and re-run the command afterward.',
+                _(
+                    'Could not combine the new content with the template. You might want to\n'
+                    'configure `mediawiki.IDContent` in your config:\n'
+                    '\tgit config --add remote.%s.mwIDcontent <id>\n'
+                    'and re-run the command afterward.'
+                ),
                 remote_name,
             )
             raise SystemExit(1)
@@ -239,7 +243,7 @@ class Preview:
         try:
             wiki = connect(remote_name, remote_url)
         except WIKI_ERRORS as error:
-            raise SystemExit(f'Could not connect to {remote_url}: {error}') from error
+            raise SystemExit(_('Could not connect to %s: %s') % (remote_url, error)) from error
 
         file_content, file_name = self.read_file_content(self.args.file)
 
@@ -251,7 +255,7 @@ class Preview:
         try:
             parsed = wiki.api('parse', text=file_content, title=wiki_page_name)
         except WIKI_ERRORS as error:
-            raise SystemExit(f'No response from remote mediawiki: {error}') from error
+            raise SystemExit(_('No response from remote mediawiki: %s') % error) from error
         new_content = parsed['parse']['text']['*']
 
         logger.debug('### Merging contents')
@@ -268,7 +272,7 @@ class Preview:
             logger.debug('Launching browser w/ file: %s', preview_file_name)
             subprocess.run(['git', 'web--browse', preview_file_name], check=False)
         else:
-            logger.info('Preview file saved as: %s', preview_file_name)
+            logger.info(_('Preview file saved as: %s'), preview_file_name)
 
     @staticmethod
     def select_remote(remote_name: str) -> tuple[str, str]:
@@ -276,9 +280,9 @@ class Preview:
         if remote_name:
             remote = Remote(remote_name)
             if not remote.exists:
-                raise SystemExit(f'{remote_name} is not a remote')
+                raise SystemExit(_('%s is not a remote') % remote_name)
             if not remote.wiki_url:
-                raise SystemExit(f'{remote_name} is not a mediawiki remote')
+                raise SystemExit(_('%s is not a mediawiki remote') % remote_name)
             return remote_name, remote.wiki_url
 
         upstream = Remote.upstream()
@@ -288,13 +292,15 @@ class Preview:
 
         valid_remotes = Remote.wikis()
         if not valid_remotes:
-            logger.error('No mediawiki remote in this repo.')
+            logger.error(_('No mediawiki remote in this repo.'))
         else:
             remotes_list = '\n\t'.join(valid_remotes)
             logger.error(
-                'There are multiple mediawiki remotes, which of:\n'
-                '\t%s\n'
-                'do you want ? Use the -r option to specify the remote.',
+                _(
+                    'There are multiple mediawiki remotes, which of:\n'
+                    '\t%s\n'
+                    'do you want ? Use the -r option to specify the remote.'
+                ),
                 remotes_list,
             )
         raise SystemExit(1)
@@ -322,7 +328,7 @@ class Preview:
         code = response.status_code
         url_after = response.url  # resolve all redirections
         if code != HTTP_CODE_PAGE_NOT_FOUND:
-            raise SystemExit(f"Failed to get '{page_name}' @ {url_after} w/ code {code}")
+            raise SystemExit(_("Failed to get '%s' @ %s w/ code %d") % (page_name, url_after, code))
 
         logger.debug(
             "Warning: Failed to retrieve '%s'. Create it on the mediawiki if you want\n"
@@ -333,7 +339,7 @@ class Preview:
         # requests automatically redirects GET requests
         response = wiki.session.get(f'{url}/index.php')
         if response.status_code != HTTP_CODE_OK:
-            raise SystemExit(f'Failed to get homepage @ {response.url} w/ code {code}')
+            raise SystemExit(_('Failed to get homepage @ %s w/ code %d') % (response.url, code))
         return response.text
 
 
@@ -351,22 +357,25 @@ class Setup:
         self.args = args
 
     def run(self) -> None:
-        print('This asks a few questions, checks the answers against the wiki, and')
-        print('then runs the git clone they describe. Nothing is written until the')
-        print('command is shown and confirmed.')
-        print()
+        print(
+            _(
+                'This asks a few questions, checks the answers against the wiki, and\n'
+                'then runs the git clone they describe. Nothing is written until the\n'
+                'command is shown and confirmed.\n'
+            )
+        )
 
         wiki, url = self.ask_wiki()
         config: dict[str, str] = {}
 
         print()
         tracking = self.ask_choice(
-            'Which pages should the repository track?',
+            _('Which pages should the repository track?'),
             [
-                ('pages', 'Named pages'),
-                ('categories', 'Every page in a category'),
-                ('namespaces', 'Every page in a namespace'),
-                ('all', 'The whole wiki, which on a large one is a great many pages'),
+                ('pages', _('Named pages')),
+                ('categories', _('Every page in a category')),
+                ('namespaces', _('Every page in a namespace')),
+                ('all', _('The whole wiki, which on a large one is a great many pages')),
             ],
         )
         if tracking == 'pages':
@@ -377,7 +386,7 @@ class Setup:
             config['namespaces'] = self.ask_namespace(wiki)
 
         print()
-        if self.ask_yes_no('Will you push changes back to the wiki?', default=False):
+        if self.ask_yes_no(_('Will you push changes back to the wiki?'), default=False):
             login = self.ask_login(wiki, url)
             if login:
                 config['mwLogin'] = login
@@ -386,11 +395,11 @@ class Setup:
             config['mediaexport'] = 'false'
 
         print()
-        if self.ask_yes_no('Import media files used by those pages?', default=False):
+        if self.ask_yes_no(_('Import media files used by those pages?'), default=False):
             config['mediaimport'] = 'true'
 
         print()
-        directory = self.ask('Directory to create', self.slugify(wiki.info.get('sitename', '')))
+        directory = self.ask(_('Directory to create'), self.slugify(wiki.info.get('sitename', '')))
         command = [
             'git',
             'clone',
@@ -401,11 +410,11 @@ class Setup:
             directory,
         ]
         print()
-        print('About to run:')
+        print(_('About to run:'))
         print(f'  {shlex.join(command)}')
         print()
-        if not self.ask_yes_no('Run it now?', default=True):
-            print('Nothing was written. The command above does it when you are ready.')
+        if not self.ask_yes_no(_('Run it now?'), default=True):
+            print(_('Nothing was written. The command above does it when you are ready.'))
             return
         raise SystemExit(subprocess.run(command, check=False).returncode)
 
@@ -418,7 +427,7 @@ class Setup:
             return input(prompt)
         except EOFError, KeyboardInterrupt:
             print()
-            raise SystemExit('Cancelled. Nothing was written.') from None
+            raise SystemExit(_('Cancelled. Nothing was written.')) from None
 
     @classmethod
     def ask(cls, question: str, default: str = '') -> str:
@@ -434,28 +443,36 @@ class Setup:
     @classmethod
     def ask_yes_no(cls, question: str, default: bool) -> bool:
         """Ask a yes or no question."""
-        prompt = f'{question} [{"Y/n" if default else "y/N"}]: '
+        # TRANSLATORS: the two answers offered, the capital one being what an
+        # empty answer means. Use the initials of the words below.
+        indicator = _('Y/n') if default else _('y/N')
+        # TRANSLATORS: the answers accepted for yes, then the ones for no,
+        # lowercase and separated by spaces. Plain y/yes/n/no are accepted on
+        # top of these, whatever the language.
+        yes = {*_('y yes').split(), 'y', 'yes'}
+        no = {*_('n no').split(), 'n', 'no'}
+        prompt = f'{question} [{indicator}]: '
         while True:
             answer = cls.read_line(prompt).strip().lower()
             if not answer:
                 return default
-            if answer in ('y', 'yes'):
+            if answer in yes:
                 return True
-            if answer in ('n', 'no'):
+            if answer in no:
                 return False
-            print('Please answer yes or no.')
+            print(_('Please answer yes or no.'))
 
     @classmethod
     def ask_choice(cls, question: str, options: Sequence[tuple[str, str]]) -> str:
         """Ask the user to pick one of ``options``, each a (value, label) pair."""
         print(question)
-        for number, (_, label) in enumerate(options, start=1):
+        for number, (_value, label) in enumerate(options, start=1):
             print(f'  {number}. {label}')
         while True:
-            answer = cls.read_line(f'Choice [1-{len(options)}]: ').strip()
+            answer = cls.read_line(_('Choice [1-%d]: ') % len(options)).strip()
             if answer.isdigit() and 1 <= int(answer) <= len(options):
                 return options[int(answer) - 1][0]
-            print(f'Please enter a number between 1 and {len(options)}.')
+            print(_('Please enter a number between 1 and %d.') % len(options))
 
     ################################# questions ###############################
 
@@ -477,49 +494,52 @@ class Setup:
     def ask_wiki(cls) -> tuple[MediaWiki, str]:
         """Ask for a wiki address until one of them answers."""
         while True:
-            typed = cls.ask('Address of the wiki', 'https://en.wikipedia.org/w')
+            typed = cls.ask(_('Address of the wiki'), 'https://en.wikipedia.org/w')
             for url in cls.url_candidates(typed):
                 try:
                     wiki = MediaWiki(url)
                 except WIKI_ERRORS as error:
-                    print(f'  {url}/api.php did not answer: {error}')
+                    print(_('  %s/api.php did not answer: %s') % (url, error))
                     continue
                 if url != typed:
-                    print(f'  using {url}, which is where api.php lives')
+                    print(_('  using %s, which is where api.php lives') % url)
                 name = wiki.info.get('sitename', url)
-                print(f'  connected to {name}, {wiki.info.get("generator", "MediaWiki")}')
+                print(_('  connected to %s, %s') % (name, wiki.info.get('generator', 'MediaWiki')))
                 return wiki, url
 
     @classmethod
     def ask_pages(cls, wiki: MediaWiki) -> str:
         """Ask for page titles and check them against the wiki."""
-        print('Write a space in a title as an underscore, as the config does.')
+        print(_('Write a space in a title as an underscore, as the config does.'))
         while True:
-            titles = cls.ask('Page titles, separated by spaces').split()
+            titles = cls.ask(_('Page titles, separated by spaces')).split()
             query = wiki.query(titles='|'.join(titles)).get('query', {})
             for renamed in query.get('normalized', []):
-                print(f'  {renamed["from"]} is the page "{renamed["to"]}"')
+                print(_('  %s is the page "%s"') % (renamed['from'], renamed['to']))
             missing = [
                 page['title']
                 for page_id, page in query.get('pages', {}).items()
                 if int(page_id) < 0
             ]
             for title in missing:
-                print(f'  there is no page "{title}"')
-            if not missing or cls.ask_yes_no('Track them anyway?', default=False):
+                print(_('  there is no page "%s"') % title)
+            if not missing or cls.ask_yes_no(_('Track them anyway?'), default=False):
                 return ' '.join(titles)
 
     @classmethod
     def ask_category(cls, wiki: MediaWiki) -> str:
         """Ask for a category and check that it has members."""
         while True:
-            name = cls.ask('Category, without the "Category:" prefix')
+            name = cls.ask(_('Category, without the "Category:" prefix'))
             result = wiki.query(list='categorymembers', cmtitle=f'Category:{name}', cmlimit=50)
             members = result.get('query', {}).get('categorymembers', [])
             if not members:
-                print(f'  Category:{name} has no pages')
+                print(_('  Category:%s has no pages') % name)
                 continue
-            print(f'  {len(members)}{" or more" if "continue" in result else ""} pages:')
+            if 'continue' in result:
+                print(_('  %d or more pages:') % len(members))
+            else:
+                print(ngettext('  %d page:', '  %d pages:', len(members)) % len(members))
             for page in members[:5]:
                 print(f'    {page["title"]}')
             return name.replace(' ', '_')
@@ -537,33 +557,38 @@ class Setup:
             local = namespace.get('*') or '(Main)'
             label = canonical if local == canonical else f'{canonical} ({local})'
             options.append((canonical.replace(' ', '_'), label))
-        return cls.ask_choice('Which namespace?', options)
+        return cls.ask_choice(_('Which namespace?'), options)
 
     @classmethod
     def ask_login(cls, wiki: MediaWiki, url: str) -> str:
         """Ask for a bot password, check it, and hand it to git credential."""
         print()
-        print('Pushing needs an account. Wikimedia wikis, Wikipedia among them, do')
-        print('not accept a main-account password here and want a bot password:')
-        print(f'  {url}/index.php?title=Special:BotPasswords')
-        print('Grant it at least "Edit existing pages".')
+        print(
+            _(
+                'Pushing needs an account. Wikimedia wikis, Wikipedia among them, do\n'
+                'not accept a main-account password here and want a bot password:\n'
+                '  %s/index.php?title=Special:BotPasswords\n'
+                'Grant it at least "Edit existing pages".'
+            )
+            % url
+        )
         while True:
-            login = cls.ask('Login name, of the form YourName@labelyoupicked')
+            login = cls.ask(_('Login name, of the form YourName@labelyoupicked'))
             try:
-                password = getpass.getpass('Password (not echoed): ')
+                password = getpass.getpass(_('Password (not echoed): '))
             except EOFError, KeyboardInterrupt:
                 print()
-                raise SystemExit('Cancelled. Nothing was written.') from None
+                raise SystemExit(_('Cancelled. Nothing was written.')) from None
             try:
                 wiki.login(login, password)
             except WIKI_ERRORS as error:
-                print(f'  the wiki refused that login: {error}')
-                if not cls.ask_yes_no('Try again?', default=True):
+                print(_('  the wiki refused that login: %s') % error)
+                if not cls.ask_yes_no(_('Try again?'), default=True):
                     return ''
                 continue
-            print(f'  logged in as {wiki.site.username}')
+            print(_('  logged in as %s') % wiki.site.username)
             git_credential({'url': url, 'username': login, 'password': password}, 'approve')
-            print('  password handed to git credential, so it is asked for once only')
+            print(_('  password handed to git credential, so it is asked for once only'))
             return login
 
     @staticmethod
@@ -575,7 +600,8 @@ class Setup:
 #################################### Main #####################################
 
 
-PREVIEW_DESCRIPTION = """\
+PREVIEW_DESCRIPTION = _(
+    """\
 Preview is a utility to preview local content of a mediawiki repo as if it was
 pushed on the remote.
 
@@ -594,8 +620,10 @@ the mediawiki.
 Finally, preview will save the HTML result in a file. and autoload it
 in your default web browser if the option --autoload is present.\
 """
+)
 
-SETUP_DESCRIPTION = """\
+SETUP_DESCRIPTION = _(
+    """\
 Setup asks where the wiki is, what of it you want, and whether you intend to
 push, and then runs the git clone that follows from the answers.
 
@@ -605,15 +633,16 @@ accepted. The namespaces on offer are the ones the wiki reports.
 
 Nothing is written until the clone command is printed and confirmed.\
 """
+)
 
-VERBOSE_HELP = "show more information on what's going on under the hood"
+VERBOSE_HELP = _("show more information on what's going on under the hood")
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``git mw`` parser, with one subparser per command."""
     parser = argparse.ArgumentParser(
         prog='git mw',
-        description='Set of tools for a git repo with a mediawiki remote.',
+        description=_('Set of tools for a git repo with a mediawiki remote.'),
     )
     parser.add_argument('-v', '--verbose', action='store_true', help=VERBOSE_HELP)
     commands = parser.add_subparsers(dest='command', metavar='<command>')
@@ -632,49 +661,57 @@ def build_parser() -> argparse.ArgumentParser:
         )
         return command
 
-    add('help', 'display help information about git mw')
+    add('help', _('display help information about git mw'))
 
     add(
         'setup',
-        'set up a repository for a wiki, asking questions',
+        _('set up a repository for a wiki, asking questions'),
         description=SETUP_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     preview_parser = add(
         'preview',
-        'parse and render local file into HTML',
+        _('parse and render local file into HTML'),
         description=PREVIEW_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     preview_parser.add_argument(
         'file',
         metavar='<file>',
-        help='file to preview; if there is no such file in the current '
-        'directory it is taken to be a blob',
+        help=_(
+            'file to preview; if there is no such file in the current '
+            'directory it is taken to be a blob'
+        ),
     )
     preview_parser.add_argument(
         '-r',
         '--remote',
         default='',
         metavar='<remote>',
-        help='preview against this remote. The template and the parse engine '
-        "used will be that remote's. If it is not a mediawiki, a list of "
-        'valid remotes is shown',
+        help=_(
+            'preview against this remote. The template and the parse engine '
+            "used will be that remote's. If it is not a mediawiki, a list of "
+            'valid remotes is shown'
+        ),
     )
     preview_parser.add_argument(
         '-a',
         '--autoload',
         action='store_true',
-        help='try to load the HTML output in a new tab (or new window) of your default web browser',
+        help=_(
+            'try to load the HTML output in a new tab (or new window) of your default web browser'
+        ),
     )
     preview_parser.add_argument(
         '-o',
         '--output',
         default='',
         metavar='<file>',
-        help='write the HTML here. Defaults to the input filename with its '
-        "extension replaced by '.html'",
+        help=_(
+            'write the HTML here. Defaults to the input filename with its '
+            "extension replaced by '.html'"
+        ),
     )
     return parser
 

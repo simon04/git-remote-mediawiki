@@ -5,11 +5,14 @@ scripts, which declare the ``mwclient`` dependency in their PEP 723
 inline metadata; it is not meant to be run on its own.
 """
 
+import gettext
 import io
 import logging
+import os
 import re
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -47,6 +50,7 @@ __all__ = [
     'WIKI_ERRORS',
     'APIError',
     'MediaWiki',
+    '_',
     'clean_filename',
     'connect',
     'git_config',
@@ -54,6 +58,7 @@ __all__ = [
     'git_config_bool',
     'git_credential',
     'logger',
+    'ngettext',
     'revision_content',
     'run_git',
     'run_git_bytes',
@@ -63,6 +68,48 @@ __all__ = [
 # Progress reports and diagnostics go to stderr, where Git relays them to the
 # user without mixing them into the fast-import stream.
 logger = logging.getLogger('git-mediawiki')
+
+
+############################### Translations ##################################
+
+# The name of the message catalog, i.e. locale/<language>/LC_MESSAGES/<this>.mo
+TEXTDOMAIN = 'git-remote-mediawiki'
+
+
+def locale_dir() -> str | None:
+    """Return the directory to load message catalogs from, or None for none.
+
+    The catalogs are looked for beside the scripts, since that is how they are
+    installed: copied into ``git --exec-path``. TEXTDOMAINDIR, which the GNU
+    gettext tools honour as well, overrides that, and is what lets the scripts
+    be run from a checkout against catalogs built somewhere else.
+    """
+    override = os.environ.get('TEXTDOMAINDIR')
+    if override:
+        return override
+    beside_the_scripts = Path(__file__).resolve().parent / 'locale'
+    return str(beside_the_scripts) if beside_the_scripts.is_dir() else None
+
+
+# fallback=True: with no catalog for the user's language, every message comes
+# out as the English it is written in here.
+_translation = gettext.translation(TEXTDOMAIN, locale_dir(), fallback=True)
+
+# Mark a message for translation. What it wraps has to be a literal, because
+# xgettext collects the messages by reading the source: an f-string would
+# leave nothing to collect, and would be looked up after interpolation.
+# Interpolate afterwards instead, with % on the result -- or, for a logger
+# call, by passing the arguments along and letting logging do it.
+#
+# The rule for what to wrap: everything the user is meant to read, which is
+# the messages logged at info level and above, what the questionnaire prints
+# and asks, and the usage text. Not the fast-import stream and the
+# remote-helper replies, which Git parses; not the content the bridge writes
+# to the wiki or to Git, which both ends compare across users; and not the
+# debug log, which is a trace of what the code is doing rather than a message
+# to anybody.
+_ = _translation.gettext
+ngettext = _translation.ngettext
 
 
 ############################### Git helpers ###################################
@@ -136,7 +183,7 @@ def git_credential(credential: dict[str, str], operation: str = 'fill') -> dict[
     for line in process.stdout.splitlines():
         if not line:
             break
-        key, _, value = line.partition('=')
+        key, _separator, value = line.partition('=')
         filled[key] = value
     return filled
 
@@ -288,12 +335,14 @@ def connect(remote_name: str, remote_url: str) -> MediaWiki:
         wiki.login(credential['username'], credential['password'], wiki_domain)
     except WIKI_ERRORS as error:
         logger.warning(
-            f'Failed to log in mediawiki user "{credential["username"]}" on {remote_url}'
+            _('Failed to log in mediawiki user "%s" on %s\n  (error %s)'),
+            credential['username'],
+            remote_url,
+            error,
         )
-        logger.warning(f'  (error {error})')
         git_credential(credential, 'reject')
         raise SystemExit(1) from error
 
     git_credential(credential, 'approve')
-    logger.warning(f'Logged in mediawiki user "{credential["username"]}".')
+    logger.warning(_('Logged in mediawiki user "%s".'), credential['username'])
     return wiki
