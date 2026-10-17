@@ -13,6 +13,6 @@ indent_style = space
 [*.toml]
 indent_style = space
 
-[{*.py,git-mw,git-remote-mediawiki}]
+[{*.py,git-mw,git-remote-mediawiki,git-clone-mediawiki}]
 indent_style = space
 indent_size = 4
