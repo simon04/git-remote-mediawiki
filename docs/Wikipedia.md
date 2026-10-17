@@ -51,6 +51,14 @@ git clone -c remote.origin.pages="Git Linux_kernel" mediawiki::https://en.wikipe
 git clone -c remote.origin.categories="Version_control_systems" mediawiki::https://en.wikipedia.org/w wikipedia
 ```
 
+Or let `git clone-mediawiki` work that out from the address of a page or a
+category, in any language edition:
+
+```shell
+git clone-mediawiki https://en.wikipedia.org/wiki/Git
+git clone-mediawiki https://en.wikipedia.org/wiki/Category:Version_control_systems
+```
+
 ## Logging in needs a bot password
 
 git-remote-mediawiki authenticates with the API's `action=login`. Wikipedia's own

@@ -29,7 +29,7 @@ git-remote-mediawiki began life as `contrib/mw-to-git` in Git's own source tree,
 Copy the scripts into Git's exec path, which is already on your `PATH`:
 
 ```shell
-install -m 755 git-remote-mediawiki git-mw "$(git --exec-path)"
+install -m 755 git-remote-mediawiki git-mw git-clone-mediawiki "$(git --exec-path)"
 install -m 644 git_mediawiki.py "$(git --exec-path)"
 ```
 
@@ -39,7 +39,7 @@ Alternatively, you may install git-remote-mediawiki step by step:
 
 1. Copy or symlink `git-remote-mediawiki` to Git's exec path (run `git --exec-path` to find out where it is). Make sure it is called `git-remote-mediawiki` with no suffix, _not_ `git-remote-mediawiki.py`.
 2. Ensure that `git-remote-mediawiki` is marked as executable.
-3. Optionally, do the same for `git-mw`, which contains various helper commands for Git/MediaWiki integration.
+3. Optionally, do the same for `git-mw`, which contains various helper commands for Git/MediaWiki integration, and for `git-clone-mediawiki`, which clones a page or category from its address.
 4. Copy `git_mediawiki.py` next to them. Both scripts import it from their own directory, so it has to sit in the same directory as the copies (if you symlinked in step 1, it has to sit next to the symlink targets instead).
 
 ## Getting started with git-remote-mediawiki
@@ -66,6 +66,14 @@ Knowing those commands, you can now edit your wiki with your favorite text edito
 
 ## Partial import of a Wiki
 ### Limit the pages to be imported
+
+The quickest way to clone a single page, or every page of a category, is to hand its address, as shown in the browser, to `git clone-mediawiki`:
+
+    git clone-mediawiki https://de.wikipedia.org/wiki/Innsbruck
+    git clone-mediawiki https://de.wikipedia.org/wiki/Kategorie:JavaScript-Engine
+
+It finds the wiki's `api.php` from the page, asks the wiki whether the title is a category, and runs the `git clone` described below; `--dry-run` prints that command instead.
+
 
 If you don't want to clone the whole wiki, you can import only some pages with:
 

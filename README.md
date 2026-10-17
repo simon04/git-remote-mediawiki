@@ -21,7 +21,7 @@ dependency, [mwclient](https://github.com/mwclient/mwclient), on first run.
 ```shell
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or: apt/brew/pkg install uv
 
-install -m 755 git-remote-mediawiki git-mw "$(git --exec-path)"
+install -m 755 git-remote-mediawiki git-mw git-clone-mediawiki "$(git --exec-path)"
 install -m 644 git_mediawiki.py "$(git --exec-path)"
 ```
 
@@ -34,6 +34,8 @@ See the [User manual](docs/User-manual.md) for the other installation options.
 
 ```shell
 git mw setup                  # asks what you want and clones it
+git clone-mediawiki https://de.wikipedia.org/wiki/Innsbruck   # one page
+git clone-mediawiki https://de.wikipedia.org/wiki/Kategorie:JavaScript-Engine
 git clone mediawiki::http://example.com/wiki/
 git mw preview Some_page.mw
 ```
@@ -74,6 +76,8 @@ This fork picks it up and, so far:
   [uv](https://docs.astral.sh/uv/).
 * adds `git mw setup`, a questionnaire that checks each answer against the wiki
   and then runs the `git clone` it describes.
+* adds `git clone-mediawiki`, which clones a page or a category given its
+  address as shown in the browser.
 * documents [using it with Wikipedia](docs/Wikipedia.md), which needs a bot
   password rather than an account password.
 * fixes a handful of long-standing bugs on the way, among them page slices one

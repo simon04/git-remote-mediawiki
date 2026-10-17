@@ -305,6 +305,7 @@ class FakeWiki:
                     'generator': 'MediaWiki 1.43.0',
                     'sitename': 'Fake Wiki',
                     'server': self.url,
+                    'articlepath': '/view/$1',
                 }
             if 'namespaces' in siprop:
                 query['namespaces'] = {
@@ -322,11 +323,11 @@ class FakeWiki:
         if listing == 'allpages':
             return self._allpages(params, result)
         if listing == 'categorymembers':
-            category = params.get('cmtitle', '').removeprefix('Category:')
+            category = normalise_title(params.get('cmtitle', ''))
             query['categorymembers'] = [
                 {'pageid': page.pageid, 'ns': page.namespace, 'title': page.title}
                 for page in sorted(self.pages.values(), key=lambda p: p.pageid)
-                if f'Category:{category}' in page.links('Category')
+                if category in page.links('Category')
                 and (not params.get('cmnamespace') or page.namespace == int(params['cmnamespace']))
             ]
             return result
@@ -382,7 +383,8 @@ class FakeWiki:
                 normalized.append({'from': title, 'to': canonical})
             page = self.page(canonical) or self.page(title)
             if page is None:
-                pages[str(missing)] = {'ns': 0, 'title': canonical, 'missing': ''}
+                namespace = Page(pageid=0, title=canonical).namespace
+                pages[str(missing)] = {'ns': namespace, 'title': canonical, 'missing': ''}
                 missing -= 1
             else:
                 pages[str(page.pageid)] = {
@@ -494,9 +496,19 @@ class FakeWiki:
 
 TEMPLATE = (
     '<!DOCTYPE html>\n<html><head><title>Fake Wiki</title>'
-    '<link rel="stylesheet" href="/w/load.php"></head>'
+    '<link rel="stylesheet" href="/w/load.php">'
+    '<link rel="EditURI" type="application/rsd+xml" href="/wiki/api.php?action=rsd"></head>'
     '<body><a href="/wiki/Main_Page">home</a>'
     '<div id="bodyContent"><p>server-rendered</p></div></body></html>'
+)
+
+# What any page under the articlepath looks like, which is only ever read for
+# the link to api.php. Pages are served from /view/ and the API from /wiki/ so
+# that finding one from the other cannot work by guessing.
+ARTICLE = (
+    '<!DOCTYPE html>\n<html><head><title>Fake Wiki</title>'
+    '<link rel="EditURI" type="application/rsd+xml" href="/wiki/api.php?action=rsd">'
+    '</head><body><p>an article</p></body></html>'
 )
 
 
@@ -530,7 +542,11 @@ def _handler_for(wiki: FakeWiki) -> type[BaseHTTPRequestHandler]:
                 return self._send(content, 'application/octet-stream')
             if parsed.path.endswith('/index.php'):
                 return self._send(TEMPLATE.encode('utf-8'), 'text/html; charset=utf-8')
-            return self._api(parse_qs(parsed.query))
+            if parsed.path.startswith('/view/'):
+                return self._send(ARTICLE.encode('utf-8'), 'text/html; charset=utf-8')
+            if parsed.path.endswith('/api.php'):
+                return self._api(parse_qs(parsed.query))
+            return self.send_error(404)
 
         def do_POST(self) -> None:
             body = self.rfile.read(int(self.headers.get('Content-Length', 0)))

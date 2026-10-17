@@ -27,7 +27,7 @@ dev = [
 target-version = "py314"
 line-length = 100
 # These have no .py suffix, so name them explicitly.
-extend-include = ["git-remote-mediawiki", "git-mw", "bin-wrapper/git"]
+extend-include = ["git-remote-mediawiki", "git-mw", "git-clone-mediawiki", "bin-wrapper/git"]
 
 [tool.ruff.lint]
 extend-select = ["E", "W", "I", "UP", "B", "C4", "FURB", "RUF"]
@@ -47,11 +47,13 @@ include = [
     "git_mediawiki.py",
     "git-remote-mediawiki",
     "git-mw",
+    "git-clone-mediawiki",
     "t/fakewiki.py",
     "t/gitmwtest.py",
     "t/test_continuing_queries.py",
     "t/test_push_pull.py",
     "t/test_clone.py",
+    "t/test_clone_mediawiki.py",
     "t/test_export_import.py",
     "t/test_utf8.py",
     "t/install_wiki.py",

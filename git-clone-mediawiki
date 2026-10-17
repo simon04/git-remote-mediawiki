@@ -1,0 +1,204 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["mwclient>=0.11", "requests"]
+# ///
+
+# License: GPL v2 or later
+
+# Clone a single wiki page, or every page of a category, from its address in
+# the browser. Documentation & bugtracker: https://github.com/simon04/git-remote-mediawiki
+
+import argparse
+import logging
+import shlex
+import subprocess
+import sys
+from collections.abc import Sequence
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urljoin, urlsplit
+
+import requests
+
+# Allow the sibling git_mediawiki module to be imported even when this script
+# is installed (or symlinked) into Git's exec path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from git_mediawiki import VERSION, WIKI_ERRORS, MediaWiki, _, logger
+
+# MediaWiki numbers its namespaces the same way on every wiki, whatever they
+# are called locally: 14 is Category, or Kategorie on the German Wikipedia.
+CATEGORY_NAMESPACE = 14
+
+USER_AGENT = f'git-remote-mediawiki/{VERSION} (https://github.com/simon04/git-remote-mediawiki)'
+
+
+class EditURIFinder(HTMLParser):
+    """Find where api.php lives in a page MediaWiki rendered.
+
+    Every page links it in its head as
+    ``<link rel="EditURI" href="//host/w/api.php?action=rsd">``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.href: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == 'link' and attributes.get('rel') == 'EditURI' and self.href is None:
+            self.href = attributes.get('href')
+
+
+def api_candidates(page_url: str) -> list[str]:
+    """The addresses api.php may live under, the likeliest first.
+
+    That is the one the page itself names, if it can be fetched, then /w as on
+    Wikipedia, then the root of the site.
+    """
+    candidates = []
+    try:
+        response = requests.get(page_url, headers={'User-Agent': USER_AGENT}, timeout=30)
+    except OSError as error:
+        logger.debug('fetching %s failed: %s', page_url, error)
+    else:
+        # A missing page still comes back as a page, with a 404.
+        finder = EditURIFinder()
+        finder.feed(response.text)
+        if finder.href:
+            api = urlsplit(urljoin(response.url, finder.href))
+            candidates.append(f'{api.scheme}://{api.netloc}{api.path.removesuffix("/api.php")}')
+    parts = urlsplit(page_url)
+    candidates += [f'{parts.scheme}://{parts.netloc}/w', f'{parts.scheme}://{parts.netloc}']
+    return list(dict.fromkeys(candidates))
+
+
+def connect(page_url: str) -> tuple[MediaWiki, str]:
+    """Connect to the wiki serving ``page_url``, and return it with its address."""
+    for url in api_candidates(page_url):
+        try:
+            return MediaWiki(url), url
+        except WIKI_ERRORS as error:
+            logger.debug('%s/api.php did not answer: %s', url, error)
+    raise SystemExit(_('Could not find the api.php of the wiki serving %s') % page_url)
+
+
+def title_from_url(page_url: str, wiki: MediaWiki) -> str:
+    """The title of the page ``page_url`` shows, as typed in it."""
+    parts = urlsplit(page_url)
+    # index.php?title=Innsbruck&action=history and the like.
+    query_titles = parse_qs(parts.query).get('title')
+    if query_titles:
+        return query_titles[0]
+    # /wiki/Innsbruck, the way the wiki says it writes the address of a page.
+    prefix, _separator, suffix = wiki.info.get('articlepath', '/wiki/$1').partition('$1')
+    path = unquote(parts.path)
+    if path.startswith(prefix) and path.endswith(suffix) and len(path) > len(prefix + suffix):
+        return path[len(prefix) : len(path) - len(suffix)]
+    raise SystemExit(_('%s is not the address of a page on %s') % (page_url, wiki.url))
+
+
+def look_up(wiki: MediaWiki, title: str) -> tuple[str, int]:
+    """Return the title as the wiki writes it, and its namespace number."""
+    query = wiki.query(titles=title).get('query', {})
+    page = next(iter(query.get('pages', {}).values()), None)
+    if page is None or 'invalid' in page:
+        raise SystemExit(_('"%s" is not a valid title on %s') % (title, wiki.url))
+    if 'missing' in page and page['ns'] != CATEGORY_NAMESPACE:
+        # A category can have members without having a page of its own.
+        raise SystemExit(_('There is no page "%s" on %s') % (page['title'], wiki.url))
+    return page['title'], page['ns']
+
+
+def default_directory(title: str, namespace: int) -> str:
+    """Name the clone after the page or category, as git clone would a repository."""
+    name = title.partition(':')[2] if namespace else title
+    return name.replace(' ', '_').replace('/', '_')
+
+
+def clone_command(page_url: str, directory: str | None) -> list[str]:
+    """The git clone that tracks the page or category ``page_url`` shows."""
+    wiki, url = connect(page_url)
+    logger.info(_('Found the wiki %s at %s'), wiki.info.get('sitename', url), url)
+    title, namespace = look_up(wiki, title_from_url(page_url, wiki))
+    # The values are split on whitespace, so a space is written as an underscore.
+    tracked = title.replace(' ', '_')
+    if namespace == CATEGORY_NAMESPACE:
+        logger.info(_('Cloning every page in %s'), title)
+        config = f'remote.origin.categories={tracked}'
+    else:
+        logger.info(_('Cloning the page %s'), title)
+        config = f'remote.origin.pages={tracked}'
+    return [
+        'git',
+        'clone',
+        '-c',
+        config,
+        f'mediawiki::{url}',
+        directory or default_directory(title, namespace),
+    ]
+
+
+DESCRIPTION = _(
+    """\
+Clone a wiki page, or every page of a category, given its address as shown in
+the browser, for example
+
+  git clone-mediawiki https://de.wikipedia.org/wiki/Innsbruck
+  git clone-mediawiki https://de.wikipedia.org/wiki/Kategorie:JavaScript-Engine
+
+The address of api.php is read from the page, and whether it is a category is
+asked of the wiki, so this works whatever the wiki calls its categories.\
+"""
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog='git clone-mediawiki',
+        description=DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument('url', metavar='<url>', help=_('address of a page or category'))
+    parser.add_argument(
+        'directory',
+        nargs='?',
+        metavar='<directory>',
+        help=_('directory to clone into. Defaults to the name of the page or category'),
+    )
+    parser.add_argument(
+        '-n',
+        '--dry-run',
+        action='store_true',
+        help=_('print the git clone command instead of running it'),
+    )
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        action='store_true',
+        help=_("show more information on what's going on under the hood"),
+    )
+    return parser
+
+
+def main(argv: Sequence[str]) -> None:
+    # See git-mw for why the error handlers are spelled out.
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')  # ty: ignore[unresolved-attribute]
+
+    args = build_parser().parse_args(argv)
+
+    logging.basicConfig(format='%(message)s', level=logging.INFO)
+    logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
+
+    command = clone_command(args.url, args.directory)
+    if args.dry_run:
+        print(shlex.join(command))
+        return
+    logger.info('%s', shlex.join(command))
+    raise SystemExit(subprocess.run(command, check=False).returncode)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
