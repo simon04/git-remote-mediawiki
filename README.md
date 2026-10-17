@@ -30,6 +30,15 @@ itself:
 git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && mkdir -p ~/.local/bin && ln -sf ~/.local/share/git-remote-mediawiki/git-* ~/.local/bin/
 ```
 
+If you keep your checkouts in `~/src`, or want to hack on the scripts, clone
+there instead and link from there:
+
+```shell
+git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki
+mkdir -p ~/.local/bin
+ln -sf ~/src/git-remote-mediawiki/git-* ~/.local/bin/
+```
+
 Git finds `git-remote-mediawiki`, `git-mw` and `git-clone-mediawiki` anywhere
 on `PATH`, so any other directory on it works as well, and so does putting the
 checkout itself on `PATH`. A `git pull` in the checkout updates the commands.

@@ -37,10 +37,20 @@ Link them into a directory that is already on `PATH`, such as `~/.local/bin`:
 git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && mkdir -p ~/.local/bin && ln -sf ~/.local/share/git-remote-mediawiki/git-* ~/.local/bin/
 ```
 
-Or put the checkout itself on `PATH`, for instance in `~/.bashrc`:
+If you keep your checkouts in `~/src`, or want to hack on the scripts, clone
+there instead and link from there:
 
 ```shell
-export PATH="$HOME/.local/share/git-remote-mediawiki:$PATH"
+git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki
+mkdir -p ~/.local/bin
+ln -sf ~/src/git-remote-mediawiki/git-* ~/.local/bin/
+```
+
+Or put the checkout itself on `PATH`, for instance in `~/.bashrc` (with
+whichever of the two directories above you cloned into):
+
+```shell
+export PATH="$HOME/src/git-remote-mediawiki:$PATH"
 ```
 
 Either way, a `git pull` in the checkout updates the commands. Link rather than
