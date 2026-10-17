@@ -22,22 +22,24 @@ dependency, [mwclient](https://github.com/mwclient/mwclient), on first run.
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or: apt/brew/pkg install uv
 ```
 
-Then, in one line, clone this repository and link its `git-*` scripts into
-`~/.local/bin`, which is on `PATH` on most systems and is where uv installs
+Then, in one line, clone this repository and have `install.sh` link its
+`git-*` scripts into `~/.local/bin`, which is on `PATH` on most systems and is where uv installs
 itself:
 
 ```shell
-git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && mkdir -p ~/.local/bin && ln -sf ~/.local/share/git-remote-mediawiki/git-* ~/.local/bin/
+git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && cd ~/.local/share/git-remote-mediawiki && ./install.sh
 ```
 
 If you keep your checkouts in `~/src`, or want to hack on the scripts, clone
 there instead and link from there:
 
 ```shell
-git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki
-mkdir -p ~/.local/bin
-ln -sf ~/src/git-remote-mediawiki/git-* ~/.local/bin/
+git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki && cd ~/src/git-remote-mediawiki && ./install.sh
 ```
+
+`./install.sh` links the `git-*` scripts of the checkout it is run in into
+`~/.local/bin`, or into the directory given as its argument, and warns if that
+directory is not on `PATH`.
 
 Git finds `git-remote-mediawiki`, `git-mw` and `git-clone-mediawiki` anywhere
 on `PATH`, so any other directory on it works as well, and so does putting the

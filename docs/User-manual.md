@@ -34,17 +34,19 @@ in one of two ways.
 Link them into a directory that is already on `PATH`, such as `~/.local/bin`:
 
 ```shell
-git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && mkdir -p ~/.local/bin && ln -sf ~/.local/share/git-remote-mediawiki/git-* ~/.local/bin/
+git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && cd ~/.local/share/git-remote-mediawiki && ./install.sh
 ```
 
 If you keep your checkouts in `~/src`, or want to hack on the scripts, clone
 there instead and link from there:
 
 ```shell
-git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki
-mkdir -p ~/.local/bin
-ln -sf ~/src/git-remote-mediawiki/git-* ~/.local/bin/
+git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki && cd ~/src/git-remote-mediawiki && ./install.sh
 ```
+
+`./install.sh` links the `git-*` scripts of the checkout it is run in into
+`~/.local/bin`, or into the directory given as its argument, and warns if that
+directory is not on `PATH`.
 
 Or put the checkout itself on `PATH`, for instance in `~/.bashrc` (with
 whichever of the two directories above you cloned into):
