@@ -20,15 +20,21 @@ dependency, [mwclient](https://github.com/mwclient/mwclient), on first run.
 
 ```shell
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or: apt/brew/pkg install uv
-
-install -m 755 git-remote-mediawiki git-mw git-clone-mediawiki "$(git --exec-path)"
-install -m 644 git_mediawiki.py "$(git --exec-path)"
 ```
 
-`git_mediawiki.py` is imported by both scripts from their own directory, so it
-has to be installed alongside them.
+Then, in one line, clone this repository and link its `git-*` scripts into
+`~/.local/bin`, which is on `PATH` on most systems and is where uv installs
+itself:
 
-See the [User manual](docs/User-manual.md) for the other installation options.
+```shell
+git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && mkdir -p ~/.local/bin && ln -sf ~/.local/share/git-remote-mediawiki/git-* ~/.local/bin/
+```
+
+Git finds `git-remote-mediawiki`, `git-mw` and `git-clone-mediawiki` anywhere
+on `PATH`, so any other directory on it works as well, and so does putting the
+checkout itself on `PATH`. A `git pull` in the checkout updates the commands.
+
+See the [User manual](docs/User-manual.md) for the details.
 
 ## Usage
 
@@ -40,12 +46,11 @@ git clone mediawiki::http://example.com/wiki/
 git mw preview Some_page.mw
 ```
 
-To try the scripts without installing them, use the wrapper, which puts this
-directory first on `PATH`:
+To try the scripts from a checkout without installing them, put it first on
+`PATH` for one command:
 
 ```shell
-bin-wrapper/git clone mediawiki::http://example.com/wiki/
-bin-wrapper/git mw preview Some_page.mw
+PATH="$PWD:$PATH" git clone mediawiki::http://example.com/wiki/
 ```
 
 ## Development

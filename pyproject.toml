@@ -1,7 +1,7 @@
-# This is not a distributable Python package: git-remote-mediawiki and git-mw
-# are PEP 723 scripts that declare their own dependencies and are installed by
-# copying them into Git's exec path. This file exists to pin the development
-# tooling and configure it, hence package = false and an empty dependency list.
+# This is not a distributable Python package: the git-* scripts are PEP 723
+# scripts that declare their own dependencies and are installed by putting them
+# on PATH. This file exists to pin the development tooling and configure it,
+# hence package = false and an empty dependency list.
 
 [project]
 name = "git-remote-mediawiki"
@@ -27,7 +27,7 @@ dev = [
 target-version = "py314"
 line-length = 100
 # These have no .py suffix, so name them explicitly.
-extend-include = ["git-remote-mediawiki", "git-mw", "git-clone-mediawiki", "bin-wrapper/git"]
+extend-include = ["git-remote-mediawiki", "git-mw", "git-clone-mediawiki"]
 
 [tool.ruff.lint]
 extend-select = ["E", "W", "I", "UP", "B", "C4", "FURB", "RUF"]
@@ -57,5 +57,4 @@ include = [
     "t/test_export_import.py",
     "t/test_utf8.py",
     "t/install_wiki.py",
-    "bin-wrapper/git",
 ]

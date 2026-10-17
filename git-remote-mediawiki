@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NoReturn
 
 # Allow the sibling git_mediawiki module to be imported even when this script
-# is installed (or symlinked) into Git's exec path.
+# is symlinked into a directory on PATH.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from git_mediawiki import (

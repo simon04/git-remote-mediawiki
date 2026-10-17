@@ -79,8 +79,8 @@ TEXTDOMAIN = 'git-remote-mediawiki'
 def locale_dir() -> str | None:
     """Return the directory to load message catalogs from, or None for none.
 
-    The catalogs are looked for beside the scripts, since that is how they are
-    installed: copied into ``git --exec-path``. TEXTDOMAINDIR, which the GNU
+    The catalogs are looked for beside the scripts, following symlinks, since
+    that is how they are installed: linked from a checkout onto PATH. TEXTDOMAINDIR, which the GNU
     gettext tools honour as well, overrides that, and is what lets the scripts
     be run from a checkout against catalogs built somewhere else.
     """

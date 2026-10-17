@@ -26,21 +26,28 @@ git-remote-mediawiki began life as `contrib/mw-to-git` in Git's own source tree,
 
 #### Installing from source
 
-Copy the scripts into Git's exec path, which is already on your `PATH`:
+Git runs a `git-<name>` program it finds anywhere on `PATH` as `git <name>`,
+and a `git-remote-<scheme>` one as the helper for `<scheme>::` URLs. So
+installing means getting the three `git-*` scripts of a checkout onto `PATH`,
+in one of two ways.
+
+Link them into a directory that is already on `PATH`, such as `~/.local/bin`:
 
 ```shell
-install -m 755 git-remote-mediawiki git-mw git-clone-mediawiki "$(git --exec-path)"
-install -m 644 git_mediawiki.py "$(git --exec-path)"
+git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && mkdir -p ~/.local/bin && ln -sf ~/.local/share/git-remote-mediawiki/git-* ~/.local/bin/
 ```
 
-#### Installing manually
+Or put the checkout itself on `PATH`, for instance in `~/.bashrc`:
 
-Alternatively, you may install git-remote-mediawiki step by step:
+```shell
+export PATH="$HOME/.local/share/git-remote-mediawiki:$PATH"
+```
 
-1. Copy or symlink `git-remote-mediawiki` to Git's exec path (run `git --exec-path` to find out where it is). Make sure it is called `git-remote-mediawiki` with no suffix, _not_ `git-remote-mediawiki.py`.
-2. Ensure that `git-remote-mediawiki` is marked as executable.
-3. Optionally, do the same for `git-mw`, which contains various helper commands for Git/MediaWiki integration, and for `git-clone-mediawiki`, which clones a page or category from its address.
-4. Copy `git_mediawiki.py` next to them. Both scripts import it from their own directory, so it has to sit in the same directory as the copies (if you symlinked in step 1, it has to sit next to the symlink targets instead).
+Either way, a `git pull` in the checkout updates the commands. Link rather than
+copy: the scripts import `git_mediawiki.py`, and find their translations, next
+to the file a link points at, so a copy needs `git_mediawiki.py` copied beside
+it too. Whatever the name, keep it without a suffix: `git-remote-mediawiki`,
+_not_ `git-remote-mediawiki.py`.
 
 ## Getting started with git-remote-mediawiki
 
