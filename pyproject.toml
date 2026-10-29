@@ -48,6 +48,7 @@ include = [
     "git-remote-mediawiki",
     "git-mw",
     "git-clone-mediawiki",
+    "install.py",
     "t/fakewiki.py",
     "t/gitmwtest.py",
     "t/test_continuing_queries.py",

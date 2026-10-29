@@ -22,22 +22,22 @@ dependency, [mwclient](https://github.com/mwclient/mwclient), on first run.
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or: apt/brew/pkg install uv
 ```
 
-Then, in one line, clone this repository and have `install.sh` link its
+Then, in one line, clone this repository and have `install.py` link its
 `git-*` scripts into `~/.local/bin`, which is on `PATH` on most systems and is where uv installs
 itself:
 
 ```shell
-git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && cd ~/.local/share/git-remote-mediawiki && ./install.sh
+git clone https://github.com/simon04/git-remote-mediawiki ~/.local/share/git-remote-mediawiki && cd ~/.local/share/git-remote-mediawiki && ./install.py
 ```
 
 If you keep your checkouts in `~/src`, or want to hack on the scripts, clone
 there instead and link from there:
 
 ```shell
-git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki && cd ~/src/git-remote-mediawiki && ./install.sh
+git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-mediawiki && cd ~/src/git-remote-mediawiki && ./install.py
 ```
 
-`./install.sh` links the `git-*` scripts of the checkout it is run in into
+`./install.py` links the `git-*` scripts of the checkout it is run in into
 `~/.local/bin`, or into the directory given as its argument, and warns if that
 directory is not on `PATH`.
 
