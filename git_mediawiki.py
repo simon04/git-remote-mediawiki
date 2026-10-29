@@ -34,6 +34,21 @@ HTTP_CODE_PAGE_NOT_FOUND = 404
 # POSIX NAME_MAX. Used to keep the on-disk file names short enough.
 NAME_MAX = 255
 
+# Extension of the file a page becomes, by content model. Anything else is
+# wikitext, and becomes a .mw file.
+CONTENT_MODEL_EXTENSIONS = {
+    'javascript': 'js',
+    'css': 'css',
+    'sanitized-css': 'css',
+    'Scribunto': 'lua',
+    'json': 'json',
+}
+
+# MediaWiki gives a page the JavaScript, CSS or JSON content model when its
+# title ends in .js, .css or .json, so such a file is named after its page as it stands
+# rather than getting the extension a second time.
+EXTENSIONS_IN_TITLE = {'js', 'css', 'json'}
+
 # Errors raised while talking to a wiki. Everything mwclient raises derives
 # from MwClientError, and the requests exceptions below it derive from OSError.
 WIKI_ERRORS = (MwClientError, OSError)
@@ -53,6 +68,7 @@ __all__ = [
     '_',
     'clean_filename',
     'connect',
+    'filename_for_page',
     'git_config',
     'git_config_all',
     'git_config_bool',
@@ -62,7 +78,7 @@ __all__ = [
     'revision_content',
     'run_git',
     'run_git_bytes',
-    'smudge_filename',
+    'title_for_filename',
 ]
 
 # Progress reports and diagnostics go to stderr, where Git relays them to the
@@ -202,7 +218,7 @@ def clean_filename(filename: str) -> str:
 
 
 def smudge_filename(filename: str) -> str:
-    """Turn a MediaWiki page name into the corresponding Git file name."""
+    """Turn a MediaWiki page name into the corresponding Git file name stem."""
     filename = filename.replace('/', SLASH_REPLACEMENT).replace(' ', '_')
     # Decode forbidden characters encoded in clean_filename
     filename = re.sub(
@@ -210,7 +226,32 @@ def smudge_filename(filename: str) -> str:
         lambda match: chr(int(match.group(1), 16)),
         filename,
     )
-    return filename[: NAME_MAX - len('.mw')]
+    return filename
+
+
+def filename_for_page(title: str, content_model: str | None = None) -> str:
+    """The Git file a page becomes, e.g. Foo.mw, MediaWiki:Common.js, Module:Foo.lua."""
+    extension = CONTENT_MODEL_EXTENSIONS.get(content_model or '', 'mw')
+    stem = smudge_filename(title)
+    if extension in EXTENSIONS_IN_TITLE:
+        stem = stem.removesuffix(f'.{extension}')
+    return f'{stem[: NAME_MAX - len(extension) - 1]}.{extension}'
+
+
+def title_for_filename(filename: str) -> str | None:
+    """The page a Git file stands for, or None if it is a media file.
+
+    The inverse of :func:`filename_for_page`, taking a file name already passed
+    through :func:`clean_filename`.
+    """
+    stem, dot, extension = filename.rpartition('.')
+    if not dot:
+        return None
+    if extension in EXTENSIONS_IN_TITLE:
+        return filename
+    if extension in ('mw', 'lua'):
+        return stem
+    return None
 
 
 ############################# MediaWiki access ################################

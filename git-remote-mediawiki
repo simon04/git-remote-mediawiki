@@ -40,6 +40,7 @@ from git_mediawiki import (
     _,
     clean_filename,
     connect,
+    filename_for_page,
     git_config,
     git_config_all,
     git_config_bool,
@@ -48,7 +49,7 @@ from git_mediawiki import (
     revision_content,
     run_git,
     run_git_bytes,
-    smudge_filename,
+    title_for_filename,
 )
 
 # The four constants below are wiki and Git content rather than messages, so
@@ -109,7 +110,7 @@ class MediaFile:
 class Commit:
     """A MediaWiki revision, ready to be written to the fast-import stream."""
 
-    title: str
+    filename: str
     author: str
     comment: str
     content: str
@@ -753,7 +754,7 @@ class GitRemoteMediaWiki:
         n: int,
         mediafile: MediaFile | None = None,
     ) -> None:
-        title = commit.title
+        filename = commit.filename
         comment = commit.comment
         content = commit.content
         author = fe_escape_ident(commit.author)
@@ -768,14 +769,14 @@ class GitRemoteMediaWiki:
         if not full_import and n == 1:
             sys.stdout.write(f'from refs/mediawiki/{self.remotename}/master^0\n')
         if content != DELETED_CONTENT:
-            sys.stdout.write(f'M 644 inline {fe_escape_path(f"{title}.mw")}\n')
+            sys.stdout.write(f'M 644 inline {fe_escape_path(filename)}\n')
             literal_data(content)
             if mediafile is not None:
                 sys.stdout.write(f'M 644 inline {fe_escape_path(mediafile.title)}\n')
                 literal_data(mediafile.content)
             sys.stdout.write('\n\n')
         else:
-            sys.stdout.write(f'D {fe_escape_path(f"{title}.mw")}\n')
+            sys.stdout.write(f'D {fe_escape_path(filename)}\n')
 
         # mediawiki revision number in the git note
         if full_import and n == 1:
@@ -895,7 +896,7 @@ class GitRemoteMediaWiki:
             try:
                 result = self.wiki.query(
                     prop='revisions',
-                    rvprop='content|timestamp|comment|user|ids',
+                    rvprop='content|contentmodel|timestamp|comment|user|ids',
                     revids=revs,
                 )
             except WIKI_ERRORS as error:
@@ -964,7 +965,7 @@ class GitRemoteMediaWiki:
         self.last_timestamps[page_title] = date
 
         commit = Commit(
-            title=smudge_filename(page_title),
+            filename=filename_for_page(page_title, rev.get('contentmodel')),
             author=rev.get('user') or 'Anonymous',
             comment=rev.get('comment') or EMPTY_MESSAGE,
             content=content,
@@ -984,7 +985,7 @@ class GitRemoteMediaWiki:
         # Else do a commit only for that page.
         logger.warning(
             _('%(number)d/%(total)d: Revision #%(revid)d of %(title)s'),
-            {'number': n, 'total': total, 'revid': rev['revid'], 'title': commit.title},
+            {'number': n, 'total': total, 'revid': rev['revid'], 'title': commit.filename},
         )
         self.import_file_revision(commit, fetch_from == 1, self.imported, mediafile)
 
@@ -1081,11 +1082,10 @@ class GitRemoteMediaWiki:
         page_deleted = is_null_sha1(new_sha1)
         complete_file_name = clean_filename(complete_file_name)
 
-        match = re.match(r'^(.*)\.([^.]*)$', complete_file_name)
-        title = match.group(1) if match else None
-        extension = match.group(2) if match else ''
+        title = title_for_filename(complete_file_name)
+        extension = complete_file_name.rpartition('.')[2]
 
-        if extension == 'mw':
+        if title is not None:
             namespace_id = self.get_mw_namespace_id_for_page(complete_file_name)
             if (
                 namespace_id

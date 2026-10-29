@@ -138,6 +138,14 @@ becomes `%2F`.
 | `Git` | `Git.mw` |
 | `Linux kernel` | `Linux_kernel.mw` |
 | `User:simon04/sandbox` | `User:simon04%2Fsandbox.mw` |
+| `MediaWiki:Gadget-Stockphoto.js` | `MediaWiki:Gadget-Stockphoto.js` |
+| `User:simon04/common.css` | `User:simon04%2Fcommon.css` |
+| `User:simon04/settings.json` | `User:simon04%2Fsettings.json` |
+| `Module:Arguments` | `Module:Arguments.lua` |
+
+Wikitext pages end in `.mw`. JavaScript, CSS and JSON pages keep the `.js`,
+`.css` or `.json` their title already ends in, and Lua modules end in `.lua`,
+so that editors recognise them.
 
 Edit the file in place. Renaming it is not a page move: it is pushed as a
 delete of the old title and a creation of the new one.
@@ -145,7 +153,7 @@ delete of the old title and a creation of the new one.
 ## Media files
 
 `mediaexport` is on by default, which means **any file you commit that does not
-end in `.mw` is pushed as a file upload**. Uploads need their own grant, and
+end in `.mw`, `.js`, `.css`, `.json` or `.lua` is pushed as a file upload**. Uploads need their own grant, and
 Wikipedia only accepts a fixed set of types:
 
 ```

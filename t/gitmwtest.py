@@ -132,7 +132,12 @@ class GitMediaWikiTestCase(unittest.TestCase):
         under test, so that the test checks the rule instead of agreeing with
         whatever the implementation currently does.
         """
-        return title.replace('/', '%2F').replace(' ', '_') + '.mw'
+        name = title.replace('/', '%2F').replace(' ', '_')
+        if title.startswith(('MediaWiki:', 'User:')) and title.endswith(('.js', '.css', '.json')):
+            return name
+        if title.startswith('Module:') and not title.endswith('/doc'):
+            return f'{name}.lua'
+        return f'{name}.mw'
 
     @staticmethod
     def _normalise(text: str) -> list[str]:

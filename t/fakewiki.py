@@ -24,8 +24,10 @@ NAMESPACES = {
     'User': 2,
     'Project': 4,
     'File': 6,
+    'MediaWiki': 8,
     'Help': 12,
     'Category': 14,
+    'Module': 828,
 }
 
 # What a freshly installed MediaWiki puts on its Main Page.
@@ -77,6 +79,20 @@ class Page:
     def namespace(self) -> int:
         prefix, separator, _ = self.title.partition(':')
         return NAMESPACES.get(prefix, 0) if separator else 0
+
+    @property
+    def content_model(self) -> str:
+        """The content model MediaWiki gives a new page with this title."""
+        if self.namespace in (NAMESPACES['User'], NAMESPACES['MediaWiki']):
+            if self.title.endswith('.js'):
+                return 'javascript'
+            if self.title.endswith('.css'):
+                return 'css'
+            if self.title.endswith('.json'):
+                return 'json'
+        if self.namespace == NAMESPACES['Module'] and not self.title.endswith('/doc'):
+            return 'Scribunto'
+        return 'wikitext'
 
     @property
     def text(self) -> str:
@@ -401,8 +417,10 @@ class FakeWiki:
         wanted_props = params.get('rvprop', '').split('|')
         pages: dict[str, dict] = {}
 
-        def record(revision: Revision) -> dict:
+        def record(page: Page, revision: Revision) -> dict:
             out: dict = {'revid': revision.revid}
+            if 'contentmodel' in wanted_props:
+                out['contentmodel'] = page.content_model
             if 'timestamp' in wanted_props:
                 out['timestamp'] = revision.timestamp
             if 'comment' in wanted_props:
@@ -427,7 +445,7 @@ class FakeWiki:
                     'pageid': page.pageid,
                     'ns': page.namespace,
                     'title': page.title,
-                    'revisions': [record(r) for r in window],
+                    'revisions': [record(page, r) for r in window],
                 }
             }
             if rest:
@@ -443,7 +461,7 @@ class FakeWiki:
                         'pageid': page.pageid,
                         'ns': page.namespace,
                         'title': page.title,
-                        'revisions': [record(r) for r in found],
+                        'revisions': [record(page, r) for r in found],
                     }
             result['query']['pages'] = pages
             return result
@@ -460,7 +478,7 @@ class FakeWiki:
                         'pageid': page.pageid,
                         'ns': page.namespace,
                         'title': page.title,
-                        'revisions': [record(page.revisions[-1])],
+                        'revisions': [record(page, page.revisions[-1])],
                     }
                 }
             return result

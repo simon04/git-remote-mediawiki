@@ -45,6 +45,7 @@ from git_mediawiki import (
     logger,
     ngettext,
     run_git,
+    title_for_filename,
 )
 
 # The attribute lists html.parser hands to the tag callbacks; a value is None
@@ -248,7 +249,8 @@ class Preview:
         file_content, file_name = self.read_file_content(self.args.file)
 
         logger.debug('### Retrieving template')
-        wiki_page_name = re.sub(r'\.[^.]+$', '', clean_filename(file_name))
+        cleaned_name = clean_filename(file_name)
+        wiki_page_name = title_for_filename(cleaned_name) or re.sub(r'\.[^.]+$', '', cleaned_name)
         template = self.get_template(wiki, remote_url, wiki_page_name)
 
         logger.debug('### Parsing local content')
@@ -391,7 +393,7 @@ class Setup:
             if login:
                 config['mwLogin'] = login
         else:
-            # Otherwise every non-.mw file committed is attempted as an upload.
+            # Otherwise every file that is not a page is attempted as an upload.
             config['mediaexport'] = 'false'
 
         print()
