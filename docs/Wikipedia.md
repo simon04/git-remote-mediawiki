@@ -102,6 +102,107 @@ There is also a `remote.<name>.mwPassword` setting, but it stores the password
 in cleartext in `.git/config`; prefer the credential helper. `mwDomain` is for
 wikis behind LDAP and is not used by Wikipedia.
 
+### Logging in from every clone
+
+`mwLogin` is read per remote, so a fresh clone does not log in until it is set.
+If you often clone a page or two into a throwaway directory, set it once for
+every remote that points at Wikipedia, with a conditional include in your global
+configuration:
+
+```shell
+git config --global 'includeIf.hasconfig:remote.*.url:mediawiki::https://*.wikipedia.org/**.path' wikipedia.gitconfig
+git config --file ~/.config/git/wikipedia.gitconfig remote.origin.mwLogin 'YourName@labelyoupicked'
+```
+
+The relative path is resolved next to the global configuration file, here
+`~/.config/git/config`; use `~/wikipedia.gitconfig` if yours is `~/.gitconfig`.
+The include only applies to repositories whose remote URL matches, and this
+includes clones made with `git clone-mediawiki`.
+
+### Keeping the password encrypted with age and a FIDO2 security key
+
+The password can be kept in an [age](https://age-encryption.org)-encrypted
+file. Decrypting it then needs your FIDO2 security key plugged in, its PIN, and
+a touch. This is done by a small credential helper, so nothing is stored in
+cleartext, and there is no keyring or password manager to unlock.
+
+Any FIDO2 key that supports the `hmac-secret` extension works, which is most of
+them. Plain SSH keys of the `sk-ssh-ed25519@openssh.com` kind cannot be used
+for this, since a security key only signs with them and age cannot encrypt to
+them. Instead, the
+[age-plugin-fido2prf](https://github.com/FiloSottile/typage#age-plugin-fido2prf)
+plugin creates a separate credential on the key. `age` is packaged on Fedora;
+the plugin is built with Go against `libfido2`:
+
+```shell
+sudo dnf install age libfido2-devel gcc
+go install filippo.io/typage/fido2prf/cmd/age-plugin-fido2prf@latest
+```
+
+`go install` puts the plugin in `~/go/bin`, which has to be on your `PATH` for
+`age` to find it.
+
+Create the credential. It asks for the security key's PIN and a touch. The
+argument is the relying party ID the credential is filed under; any name works
+for use outside a browser:
+
+```shell
+mkdir -p ~/.local/share/git-credential-age
+cd ~/.local/share/git-credential-age
+age-plugin-fido2prf -generate git-credential-age > identity.txt
+```
+
+`identity.txt` is useless without the security key, but there is no public
+key: encryption is symmetric, so encrypting needs the security key too, and
+uses `-i identity.txt` rather than a recipient.
+
+Encrypt the bot password into a file named after the wiki's host. In bash,
+this reads the password without echoing it:
+
+```shell
+read -rsp 'Bot password: ' password && printf '%s' "$password" |
+  age --encrypt --identity identity.txt --output en.wikipedia.org.age; unset password
+```
+
+If you lose the security key, this file cannot be decrypted. That is acceptable
+here, since a bot password can be revoked and a new one made at
+Special:BotPasswords.
+
+Save the helper as `git-credential-age` somewhere on your `PATH`, for example
+`~/.local/bin`, and make it executable:
+
+```shell
+#!/bin/sh
+# Answer "get" by decrypting ~/.local/share/git-credential-age/HOST.age;
+# "store" and "erase" are ignored, the encrypted file is managed by hand.
+[ "$1" = get ] || exit 0
+while IFS='=' read -r key value && [ -n "$key" ]; do
+	[ "$key" = host ] && host=$value
+done
+dir=${XDG_DATA_HOME:-$HOME/.local/share}/git-credential-age
+[ -f "$dir/$host.age" ] || exit 0
+password=$(age -d -i "$dir/identity.txt" "$dir/$host.age") || exit 1
+printf 'password=%s\n' "$password"
+```
+
+Then tell Git to use it for that host only. Git looks for a program called
+`git-credential-age`:
+
+```shell
+git config --global credential.https://en.wikipedia.org.helper age
+```
+
+Check it. This should ask for the PIN and a touch, then print the password:
+
+```shell
+printf 'url=https://en.wikipedia.org/w\n\n' | git credential fill
+```
+
+Every command that talks to the wiki, `git clone`, `git pull` or `git push`,
+decrypts the password again, so expect the PIN and a touch each time. These
+prompts are shown on the terminal, so this does not work from a shell without
+one, such as a cron job.
+
 ## Committing and pushing
 
 Commit as normal. The **subject line of the commit message becomes the edit
