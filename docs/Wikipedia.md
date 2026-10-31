@@ -105,17 +105,20 @@ wikis behind LDAP and is not used by Wikipedia.
 ### Logging in from every clone
 
 `mwLogin` is read per remote, so a fresh clone does not log in until it is set.
-If you often clone a page or two into a throwaway directory, set it once for
-every remote that points at Wikipedia, with a conditional include in your global
-configuration:
+If you often clone a page or two into a throwaway directory, set it once in your
+global configuration, with a conditional include for each wiki. Wikimedia shares
+bot passwords across all its wikis, like ordinary passwords, so one login serves
+every language edition of Wikipedia, Wikimedia Commons and Wikidata:
 
 ```shell
-git config --global 'includeIf.hasconfig:remote.*.url:mediawiki::https://*.wikipedia.org/**.path' wikipedia.gitconfig
-git config --file ~/.config/git/wikipedia.gitconfig remote.origin.mwLogin 'YourName@labelyoupicked'
+for wiki in 'https://*.wikipedia.org' https://commons.wikimedia.org https://www.wikidata.org; do
+  git config --global "includeIf.hasconfig:remote.*.url:mediawiki::$wiki/**.path" wikimedia.gitconfig
+done
+git config --file ~/.config/git/wikimedia.gitconfig remote.origin.mwLogin 'YourName@labelyoupicked'
 ```
 
 The relative path is resolved next to the global configuration file, here
-`~/.config/git/config`; use `~/wikipedia.gitconfig` if yours is `~/.gitconfig`.
+`~/.config/git/config`; use `~/wikimedia.gitconfig` if yours is `~/.gitconfig`.
 The include only applies to repositories whose remote URL matches, and this
 includes clones made with `git clone-mediawiki`.
 
@@ -156,12 +159,11 @@ age-plugin-fido2prf -generate git-credential-age > identity.txt
 key: encryption is symmetric, so encrypting needs the security key too, and
 uses `-i identity.txt` rather than a recipient.
 
-Encrypt the bot password into a file named after the wiki's host. In bash,
-this reads the password without echoing it:
+Encrypt the bot password. In bash, this reads it without echoing it:
 
 ```shell
 read -rsp 'Bot password: ' password && printf '%s' "$password" |
-  age --encrypt --identity identity.txt --output en.wikipedia.org.age; unset password
+  age --encrypt --identity identity.txt --output wikimedia.age; unset password
 ```
 
 If you lose the security key, this file cannot be decrypted. That is acceptable
@@ -173,29 +175,34 @@ Save the helper as `git-credential-age` somewhere on your `PATH`, for example
 
 ```shell
 #!/bin/sh
-# Answer "get" by decrypting ~/.local/share/git-credential-age/HOST.age;
+# Usage: git-credential-age NAME get
+# Answer "get" by decrypting ~/.local/share/git-credential-age/NAME.age;
 # "store" and "erase" are ignored, the encrypted file is managed by hand.
-[ "$1" = get ] || exit 0
-while IFS='=' read -r key value && [ -n "$key" ]; do
-	[ "$key" = host ] && host=$value
-done
+[ "$2" = get ] || exit 0
 dir=${XDG_DATA_HOME:-$HOME/.local/share}/git-credential-age
-[ -f "$dir/$host.age" ] || exit 0
-password=$(age -d -i "$dir/identity.txt" "$dir/$host.age") || exit 1
+password=$(age -d -i "$dir/identity.txt" "$dir/$1.age") || exit 1
 printf 'password=%s\n' "$password"
 ```
 
-Then tell Git to use it for that host only. Git looks for a program called
-`git-credential-age`:
+Then tell Git to use it for the same wikis, and only for them. Git runs the
+helper `age wikimedia` as `git-credential-age wikimedia get`, so all of them
+share `wikimedia.age`:
 
 ```shell
-git config --global credential.https://en.wikipedia.org.helper age
+for wiki in 'https://*.wikipedia.org' https://commons.wikimedia.org https://www.wikidata.org; do
+  git config --global "credential.$wiki.helper" 'age wikimedia'
+done
 ```
+
+A `*` in a credential URL matches a single part of the host name, so
+`https://*.wikipedia.org` covers `en.wikipedia.org` and `de.wikipedia.org`
+alike. For a wiki outside Wikimedia, encrypt its password into a file of its
+own and name that file in its helper instead.
 
 Check it. This should ask for the PIN and a touch, then print the password:
 
 ```shell
-printf 'url=https://en.wikipedia.org/w\n\n' | git credential fill
+printf 'url=https://de.wikipedia.org/w\n\n' | git credential fill
 ```
 
 Every command that talks to the wiki, `git clone`, `git pull` or `git push`,
