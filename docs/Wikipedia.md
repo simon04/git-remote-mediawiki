@@ -145,6 +145,11 @@ go install filippo.io/typage/fido2prf/cmd/age-plugin-fido2prf@latest
 `go install` puts the plugin in `~/go/bin`, which has to be on your `PATH` for
 `age` to find it.
 
+Once `age` and the plugin are installed, `./install.py --age` does the rest of
+this section: it asks for the login and the bot password, creates the
+credential, encrypts the password, and writes the configuration. Run it again
+to change the login or the password. By hand, it goes like this.
+
 Create the credential. It asks for the security key's PIN and a touch. The
 argument is the relying party ID the credential is filed under; any name works
 for use outside a browser:
@@ -170,8 +175,8 @@ If you lose the security key, this file cannot be decrypted. That is acceptable
 here, since a bot password can be revoked and a new one made at
 Special:BotPasswords.
 
-Save the helper as `git-credential-age` somewhere on your `PATH`, for example
-`~/.local/bin`, and make it executable:
+The helper is `git-credential-age` in this repository, which `./install.py`
+links onto your `PATH` with the other scripts:
 
 ```shell
 #!/bin/sh
@@ -202,7 +207,7 @@ own and name that file in its helper instead.
 Check it. This should ask for the PIN and a touch, then print the password:
 
 ```shell
-printf 'url=https://de.wikipedia.org/w\n\n' | git credential fill
+printf 'url=https://de.wikipedia.org/w\nusername=YourName@labelyoupicked\n\n' | git credential fill
 ```
 
 Every command that talks to the wiki, `git clone`, `git pull` or `git push`,

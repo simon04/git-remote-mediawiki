@@ -39,7 +39,9 @@ git clone https://github.com/simon04/git-remote-mediawiki ~/src/git-remote-media
 
 `./install.py` links the `git-*` scripts of the checkout it is run in into
 `~/.local/bin`, or into the directory given as its argument, and warns if that
-directory is not on `PATH`.
+directory is not on `PATH`. `./install.py --age` also stores a Wikimedia bot
+password encrypted with age and a FIDO2 security key, see
+[Keeping the password encrypted](docs/Wikipedia.md#keeping-the-password-encrypted-with-age-and-a-fido2-security-key).
 
 Git finds `git-remote-mediawiki`, `git-mw` and `git-clone-mediawiki` anywhere
 on `PATH`, so any other directory on it works as well, and so does putting the
