@@ -122,6 +122,13 @@ class FakeWiki:
         self.requests = 0
         # A continuation bug in this fake would otherwise loop forever.
         self.request_limit = 20000
+        # Answer that many api.php requests with HTTP 429 Too Many Requests,
+        # once rate_limit_after requests have gone through, with this
+        # Retry-After unless it is None.
+        self.rate_limited = 0
+        self.rate_limit_after = 0
+        self.retry_after: str | None = '1'
+        self.rate_limited_answers = 0
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -166,6 +173,10 @@ class FakeWiki:
         self.logged_in = False
         self.unhandled.clear()
         self.requests = 0
+        self.rate_limited = 0
+        self.rate_limit_after = 0
+        self.retry_after = '1'
+        self.rate_limited_answers = 0
         self.edit_page('Main Page', MAIN_PAGE, user='MediaWiki default')
 
     def page(self, title: str) -> Page | None:
@@ -229,6 +240,18 @@ class FakeWiki:
         del revid
 
     ################################## API ################################
+
+    def rate_limit(self) -> bool:
+        """Whether to turn the next api.php request away with HTTP 429."""
+        with self._lock:
+            if self.rate_limit_after > 0:
+                self.rate_limit_after -= 1
+                return False
+            if self.rate_limited > 0:
+                self.rate_limited -= 1
+                self.rate_limited_answers += 1
+                return True
+            return False
 
     def api(self, params: dict[str, str]) -> dict:
         """Answer one api.php request."""
@@ -586,6 +609,13 @@ def _handler_for(wiki: FakeWiki) -> type[BaseHTTPRequestHandler]:
             return self._api(parse_qs(body.decode('utf-8')))
 
         def _api(self, params: dict, flat: bool = False) -> None:
+            if wiki.rate_limit():
+                self.send_response(429)
+                if wiki.retry_after is not None:
+                    self.send_header('Retry-After', wiki.retry_after)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
             single = params if flat else {k: v[0] for k, v in params.items()}
             payload = json.dumps(wiki.api(single)).encode('utf-8')
             self._send(payload, 'application/json; charset=utf-8')

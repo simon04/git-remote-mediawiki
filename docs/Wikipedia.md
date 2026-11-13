@@ -305,6 +305,16 @@ API reports an edit conflict and the push is rejected as a non-fast-forward.
 A commit touching several pages may have pushed some of them before it stops.
 Recover with `git pull --rebase` and push again.
 
+Reading is throttled too. Following
+[API:Etiquette](https://www.mediawiki.org/wiki/API:Etiquette), requests are made
+one at a time and carry `maxlag=5`, so they hold off while the database
+replicas lag. A request answered with HTTP 429 Too Many Requests is tried again
+up to six times, after as long as the wiki's `Retry-After` header says, or
+5, 10, 20… seconds without one. If the wiki still refuses, the fetch stops
+with a message; running it again carries on from the last imported revision.
+Cloning a large category with `remote.origin.shallow=true` or
+`git clone-mediawiki --depth 1` makes far fewer requests.
+
 ## User-Agent
 
 Requests identify themselves as:

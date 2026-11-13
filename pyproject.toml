@@ -57,5 +57,6 @@ include = [
     "t/test_clone_mediawiki.py",
     "t/test_export_import.py",
     "t/test_utf8.py",
+    "t/test_rate_limit.py",
     "t/install_wiki.py",
 ]

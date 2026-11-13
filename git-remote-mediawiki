@@ -40,6 +40,7 @@ from git_mediawiki import (
     _,
     clean_filename,
     connect,
+    describe_wiki_error,
     filename_for_page,
     git_config,
     git_config_all,
@@ -1382,14 +1383,18 @@ def main(argv: Sequence[str]) -> None:
     helper = GitRemoteMediaWiki(argv[0], argv[1])
 
     # Commands parser
-    while True:
-        line = sys.stdin.readline()
-        if not line:
-            break
-        if not helper.parse_command(line.rstrip('\n')):
-            break
-        # flush stdout, to make sure the previous command is fully processed.
-        sys.stdout.flush()
+    try:
+        while True:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            if not helper.parse_command(line.rstrip('\n')):
+                break
+            # flush stdout, to make sure the previous command is fully processed.
+            sys.stdout.flush()
+    except WIKI_ERRORS as error:
+        logger.debug('', exc_info=True)
+        raise SystemExit(describe_wiki_error(error)) from error
 
 
 if __name__ == '__main__':

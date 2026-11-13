@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from urllib.parse import urlsplit
 import mwclient
 import requests
 from mwclient.errors import APIError, MwClientError
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Totally unstable API.
 VERSION = '0.01'
@@ -68,6 +71,7 @@ __all__ = [
     '_',
     'clean_filename',
     'connect',
+    'describe_wiki_error',
     'filename_for_page',
     'git_config',
     'git_config_all',
@@ -256,6 +260,72 @@ def title_for_filename(filename: str) -> str | None:
 
 ############################# MediaWiki access ################################
 
+# How many times a request the wiki turned away with HTTP 429 Too Many
+# Requests is tried again, and the longest to wait between two tries when the
+# wiki does not say how long in Retry-After.
+RATE_LIMIT_RETRIES = 6
+RATE_LIMIT_BACKOFF_MAX = 120
+
+# Wikimedia asks scripts that are not run interactively to pass maxlag=5, so
+# that they hold off while the database replicas lag behind; mwclient then
+# waits for as long as the wiki's Retry-After says. Wikis without replicas
+# ignore it. https://www.mediawiki.org/wiki/Manual:Maxlag_parameter
+MAXLAG = 5
+
+
+class RateLimitRetry(Retry):
+    """Try a request again after HTTP 429 Too Many Requests, saying so.
+
+    The wiki's Retry-After is obeyed, as https://www.mediawiki.org/wiki/API:Etiquette
+    asks; without one, the wait doubles from 5 seconds up to
+    RATE_LIMIT_BACKOFF_MAX.
+    """
+
+    def sleep(self, response: Any = None) -> None:
+        wait = self.get_retry_after(response) if response is not None else None
+        if wait is None:
+            wait = min(RATE_LIMIT_BACKOFF_MAX, 5 * 2 ** (len(self.history) - 1))
+        logger.warning(
+            _('The wiki is rate limiting requests (HTTP 429), waiting %d seconds...'),
+            round(wait),
+        )
+        time.sleep(wait)
+
+
+def describe_wiki_error(error: BaseException) -> str:
+    """A one-line fatal message for an error raised while talking to a wiki."""
+    response = getattr(error, 'response', None)
+    if getattr(response, 'status_code', None) == 429:
+        return (
+            _(
+                'fatal: the wiki still answers HTTP 429 Too Many Requests after %d retries. '
+                'Wait a while, then run the command again: it carries on where it stopped.'
+            )
+            % RATE_LIMIT_RETRIES
+        )
+    return _('fatal: %s') % error
+
+
+def rate_limit_adapter() -> HTTPAdapter:
+    """An HTTP adapter that retries what the wiki rate limited, and nothing else.
+
+    Connection errors and server errors are left to mwclient's own retries. A
+    POST is retried too, since a request answered with 429 was not carried out.
+    """
+    retry = RateLimitRetry(
+        total=RATE_LIMIT_RETRIES,
+        connect=0,
+        read=0,
+        other=0,
+        redirect=False,
+        status=RATE_LIMIT_RETRIES,
+        status_forcelist=[429],
+        allowed_methods=None,
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    return HTTPAdapter(max_retries=retry)
+
 
 class MediaWiki:
     """Thin wrapper around :class:`mwclient.Site`.
@@ -276,7 +346,12 @@ class MediaWiki:
             scheme=parts.scheme or 'http',
             clients_useragent=f'git-remote-mediawiki/{VERSION} (https://github.com/simon04/git-remote-mediawiki)',
             force_login=False,
+            do_init=False,
         )
+        adapter = rate_limit_adapter()
+        self.site.connection.mount('http://', adapter)
+        self.site.connection.mount('https://', adapter)
+        self.site.site_init()
 
     @property
     def session(self) -> requests.Session:
@@ -290,18 +365,18 @@ class MediaWiki:
 
     def api(self, action: str, **params: Any) -> ApiResult:
         """Perform an API call and return the decoded JSON response."""
-        return self.site.api(action, **params)
+        return self.site.api(action, maxlag=MAXLAG, **params)
 
     def query(self, **params: Any) -> ApiResult:
         """Perform an ``action=query`` API call."""
-        return self.site.api('query', **params)
+        return self.api('query', **params)
 
     def query_list(self, list_name: str, **params: Any) -> list[ApiResult]:
         """Run a list query, following every continuation."""
         params = {'list': list_name, **params}
         items = []
         while True:
-            result = self.site.api('query', **params)
+            result = self.query(**params)
             items.extend(result.get('query', {}).get(list_name, []))
             continuation = result.get('continue')
             if not continuation:
