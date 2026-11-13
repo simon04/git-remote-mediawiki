@@ -435,9 +435,21 @@ class FakeWiki:
             page = self.pages.get(int(params['pageids']))
             if page is None:
                 return self._unhandled(params)
-            # rvstartid begins the walk, rvcontinue resumes it.
-            offset = int(params.get('rvcontinue') or params.get('rvstartid') or 0)
-            revisions = [r for r in page.revisions if r.revid >= offset]
+            # rvstartid begins the walk, rvcontinue resumes it, rvendid ends it.
+            start = params.get('rvcontinue') or params.get('rvstartid')
+            end = params.get('rvendid')
+            if params.get('rvdir') == 'older':
+                revisions = [
+                    r
+                    for r in reversed(page.revisions)
+                    if (not start or r.revid <= int(start)) and (not end or r.revid >= int(end))
+                ]
+            else:
+                revisions = [
+                    r
+                    for r in page.revisions
+                    if (not start or r.revid >= int(start)) and (not end or r.revid <= int(end))
+                ]
             limit = int(params.get('rvlimit', 500))
             window, rest = revisions[:limit], revisions[limit:]
             result['query']['pages'] = {

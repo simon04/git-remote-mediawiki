@@ -43,6 +43,58 @@ class CloneMediaWikiTest(GitMediaWikiTestCase):
         )
         self.assertNothingUnhandled()
 
+    def test_category_depth_expands_subcategories(self) -> None:
+        self.wiki.edit_page('V8', 'engine [[Category:JavaScript engines]]')
+        self.wiki.edit_page('Category:Free engines', 'subcategory [[Category:JavaScript engines]]')
+        self.wiki.edit_page('SpiderMonkey', 'engine [[Category:Free engines]]')
+        self.wiki.edit_page('Category:Mozilla', 'deeper [[Category:Free engines]]')
+        self.wiki.edit_page('Rhino', 'too deep [[Category:Mozilla]]')
+
+        shallow = self.git(
+            'clone-mediawiki', '--dry-run', self.page_url('/view/Category:JavaScript_engines')
+        )
+        self.assertIn('remote.origin.categories=Category:JavaScript_engines ', shallow.stdout)
+
+        self.git(
+            'clone-mediawiki',
+            '--category-depth',
+            '2',
+            self.page_url('/view/Category:JavaScript_engines'),
+        )
+
+        # The subcategories' own pages are members too; Rhino is a level deeper.
+        repository = self.workdir / 'JavaScript_engines'
+        self.assertEqual(
+            ['Category:Free_engines.mw', 'Category:Mozilla.mw', 'SpiderMonkey.mw', 'V8.mw'],
+            self.page_files(repository),
+        )
+        self.assertEqual(
+            'Category:JavaScript_engines Category:Free_engines',
+            self.config(repository, 'remote.origin.categories'),
+        )
+        self.assertNothingUnhandled()
+
+    def test_depth_limits_the_history(self) -> None:
+        self.wiki.edit_page('Innsbruck', 'first')
+        self.wiki.edit_page('Innsbruck', 'second')
+        self.wiki.edit_page('Innsbruck', 'third')
+
+        self.git('clone-mediawiki', '--depth', '1', self.page_url('/view/Innsbruck'))
+
+        repository = self.workdir / 'Innsbruck'
+        self.assertEqual('1', self.config(repository, 'remote.origin.depth'))
+        log = self.git('log', '--format=%H', 'Innsbruck.mw', cwd=repository).stdout
+        self.assertEqual(1, len(log.splitlines()))
+        self.assertNothingUnhandled()
+
+    def test_refuses_a_depth_of_zero(self) -> None:
+        completed = self.git(
+            'clone-mediawiki', '--depth', '0', self.page_url('/view/Innsbruck'), check=False
+        )
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn('0 is not a positive number', completed.stderr)
+
     def test_takes_the_title_from_index_php(self) -> None:
         self.wiki.edit_page('Some page', 'content')
 

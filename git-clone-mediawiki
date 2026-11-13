@@ -117,27 +117,85 @@ def default_directory(title: str, namespace: int) -> str:
     return name.replace(' ', '_').replace('/', '_')
 
 
-def clone_command(page_url: str, directory: str | None) -> list[str]:
+def subcategories(wiki: MediaWiki, category: str) -> list[str]:
+    """The titles of the categories directly in ``category``."""
+    members = wiki.query_list(
+        'categorymembers', cmtitle=category, cmnamespace=CATEGORY_NAMESPACE, cmlimit='max'
+    )
+    return [member['title'] for member in members]
+
+
+def expand_categories(wiki: MediaWiki, category: str, depth: int) -> list[str]:
+    """``category`` and the categories down to ``depth`` levels below it.
+
+    Depth 1 is the category alone, depth 2 adds its subcategories, and so on.
+    A category reached twice, as category graphs may loop, is listed once.
+    """
+    categories = [category]
+    level = [category]
+    for _level in range(depth - 1):
+        found = [sub for parent in level for sub in subcategories(wiki, parent)]
+        level = [sub for sub in dict.fromkeys(found) if sub not in categories]
+        if not level:
+            break
+        categories += level
+    return categories
+
+
+def clone_command(
+    page_url: str,
+    directory: str | None,
+    depth: int | None = None,
+    category_depth: int = 1,
+) -> list[str]:
     """The git clone that tracks the page or category ``page_url`` shows."""
     wiki, url = connect(page_url)
     logger.info(_('Found the wiki %s at %s'), wiki.info.get('sitename', url), url)
     title, namespace = look_up(wiki, title_from_url(page_url, wiki))
-    # The values are split on whitespace, so a space is written as an underscore.
-    tracked = title.replace(' ', '_')
     if namespace == CATEGORY_NAMESPACE:
-        logger.info(_('Cloning every page in %s'), title)
-        config = f'remote.origin.categories={tracked}'
+        categories = expand_categories(wiki, title, category_depth)
+        if len(categories) > 1:
+            logger.info(
+                _('Cloning every page in %s and %d categories below it'),
+                title,
+                len(categories) - 1,
+            )
+        else:
+            logger.info(_('Cloning every page in %s'), title)
+        config = ['-c', f'remote.origin.categories={tracked(categories)}']
     else:
+        if category_depth != 1:
+            logger.warning(_('%s is not a category, ignoring --category-depth'), title)
         logger.info(_('Cloning the page %s'), title)
-        config = f'remote.origin.pages={tracked}'
+        config = ['-c', f'remote.origin.pages={tracked([title])}']
+    if depth:
+        config += ['-c', f'remote.origin.depth={depth}']
     return [
         'git',
         'clone',
-        '-c',
-        config,
+        *config,
         f'mediawiki::{url}',
         directory or default_directory(title, namespace),
     ]
+
+
+def tracked(titles: Sequence[str]) -> str:
+    """The titles as one value of remote.origin.pages or remote.origin.categories.
+
+    The values are split on whitespace, so a space is written as an underscore.
+    """
+    return ' '.join(title.replace(' ', '_') for title in titles)
+
+
+def positive(value: str) -> int:
+    """Parse a command line number that must be 1 or more."""
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number < 1:
+        raise argparse.ArgumentTypeError(_('%s is not a positive number') % value)
+    return number
 
 
 DESCRIPTION = _(
@@ -147,6 +205,8 @@ the browser, for example
 
   git clone-mediawiki https://de.wikipedia.org/wiki/Innsbruck
   git clone-mediawiki https://de.wikipedia.org/wiki/Kategorie:JavaScript-Engine
+  git clone-mediawiki --depth 1 --category-depth 2 \\
+      https://de.wikipedia.org/wiki/Kategorie:JavaScript-Engine
 
 The address of api.php is read from the page, and whether it is a category is
 asked of the wiki, so this works whatever the wiki calls its categories.\
@@ -166,6 +226,22 @@ def build_parser() -> argparse.ArgumentParser:
         nargs='?',
         metavar='<directory>',
         help=_('directory to clone into. Defaults to the name of the page or category'),
+    )
+    parser.add_argument(
+        '--depth',
+        type=positive,
+        metavar='<depth>',
+        help=_('import only the last <depth> revisions of each page, now and on every fetch'),
+    )
+    parser.add_argument(
+        '--category-depth',
+        type=positive,
+        default=1,
+        metavar='<depth>',
+        help=_(
+            'for a category, also clone the categories up to <depth> levels below it: '
+            '1, the default, is the category alone, 2 adds its subcategories, and so on'
+        ),
     )
     parser.add_argument(
         '-n',
@@ -192,7 +268,7 @@ def main(argv: Sequence[str]) -> None:
     logging.basicConfig(format='%(message)s', level=logging.INFO)
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
-    command = clone_command(args.url, args.directory)
+    command = clone_command(args.url, args.directory, args.depth, args.category_depth)
     if args.dry_run:
         print(shlex.join(command))
         return

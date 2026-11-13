@@ -183,6 +183,27 @@ class CloneTest(GitMediaWikiTestCase):
         for name in ('Nyan.mw', 'Bar.mw', 'Main_Page.mw'):
             self.assertEqual(1, len(self.log(repository, name)), f'revisions of {name}')
 
+    def test_depth_fetches_the_last_revisions_of_each_page(self) -> None:
+        for n in range(1, 5):
+            self.wiki.edit_page('nyan', f'revision {n}', summary=f'nyan {n}')
+        self.wiki.edit_page('foo', 'only revision', summary='foo 1')
+
+        repository = self.clone(depth='2')
+
+        self.assertRepositoryMatchesWiki(repository, self.subjects('Nyan', 'Foo'))
+        self.assertEqual(['nyan 4', 'nyan 3'], self.log(repository, 'Nyan.mw'))
+        self.assertEqual(['foo 1'], self.log(repository, 'Foo.mw'))
+
+        for n in range(5, 9):
+            self.wiki.edit_page('nyan', f'revision {n}', summary=f'nyan {n}')
+        self.wiki.edit_page('foo', 'second revision', summary='foo 2')
+        self.git('pull', cwd=repository)
+
+        self.assertRepositoryMatchesWiki(repository, self.subjects('Nyan', 'Foo'))
+        self.assertEqual(['nyan 8', 'nyan 7', 'nyan 4', 'nyan 3'], self.log(repository, 'Nyan.mw'))
+        self.assertEqual(['foo 2', 'foo 1'], self.log(repository, 'Foo.mw'))
+        self.assertNothingUnhandled()
+
     def test_cloning_a_category(self) -> None:
         self.wiki.edit_page('Foo', 'I will be cloned', category='Category')
         self.wiki.edit_page('Bar', 'Meet me on the repository', category='Category')

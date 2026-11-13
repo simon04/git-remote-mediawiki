@@ -259,8 +259,19 @@ class GitRemoteMediaWiki:
         # Export media files on push, unless explicitly turned off
         self.export_media = git_config_bool(f'remote.{remotename}.mediaexport', default=True)
 
-        # Import only last revisions (both for clone and fetch)
-        self.shallow_import = git_config_bool(f'remote.{remotename}.shallow')
+        # Import only the last revisions of each page (both for clone and
+        # fetch): remote.<name>.depth of them, or just one with
+        # remote.<name>.shallow. 0 imports the whole history.
+        depth = git_config(f'remote.{remotename}.depth')
+        try:
+            self.depth = int(depth) if depth else 0
+        except ValueError:
+            raise SystemExit(
+                _('fatal: remote.%(remote)s.depth must be a number, not "%(depth)s"')
+                % {'remote': remotename, 'depth': depth}
+            ) from None
+        if not self.depth and git_config_bool(f'remote.{remotename}.shallow'):
+            self.depth = 1
 
         # Fetch (clone and pull) by revisions instead of by pages. This
         # behavior is more efficient when we have a wiki with lots of pages and
@@ -322,7 +333,7 @@ class GitRemoteMediaWiki:
         for entry in run_git(
             ['config', '--get-all', f'remote.{remotename}.namespaceCache'], quiet=True
         ).splitlines():
-            name, _, namespace_id = entry.partition(':')
+            name, _separator, namespace_id = entry.partition(':')
             self.namespace_id[name] = None if namespace_id == 'notANameSpace' else int(namespace_id)
         # Namespaces already on disk, which must not be written out again.
         self.cached_mw_namespace_id = set(self.namespace_id)
@@ -706,8 +717,15 @@ class GitRemoteMediaWiki:
             # Let MediaWiki know that we support the latest API.
             'continue': '',
         }
+        if self.depth:
+            # Walk back from the newest revision, and stop once there are
+            # enough, so a long history is not listed just to be dropped.
+            query['rvdir'] = 'older'
+            query['rvlimit'] = min(self.depth, 500)
+            if fetch_from != 1:
+                query['rvendid'] = fetch_from
         # Don't add the start if it is 1 since not all pages start at 1
-        if fetch_from != 1:
+        elif fetch_from != 1:
             query['rvstartid'] = fetch_from
 
         # Get 500 revisions at a time due to the mediawiki api limit
@@ -720,6 +738,8 @@ class GitRemoteMediaWiki:
             for revision in revisions:
                 page_revs.append({'pageid': page.pageid, 'revid': revision['revid']})
 
+            if self.depth and len(page_revs) >= self.depth:
+                break
             if 'query-continue' in result:  # For legacy APIs
                 query['rvstartid'] = result['query-continue']['revisions']['rvstartid']
             elif 'continue' in result:  # For newer APIs
@@ -728,9 +748,19 @@ class GitRemoteMediaWiki:
             else:
                 break
 
-        if self.shallow_import and page_revs:
-            logger.warning(_('  Found 1 revision (shallow import).'))
-            return [max(page_revs, key=lambda rev: rev['revid'])]
+        if self.depth:
+            # Older wikis ignore rvdir and rvendid, so trim here too.
+            page_revs = [rev for rev in page_revs if rev['revid'] >= fetch_from]
+            page_revs = sorted(page_revs, key=lambda rev: rev['revid'])[-self.depth :]
+            logger.warning(
+                ngettext(
+                    '  Found %d revision (shallow import).',
+                    '  Found %d revisions (shallow import).',
+                    len(page_revs),
+                ),
+                len(page_revs),
+            )
+            return page_revs
         logger.warning(
             ngettext('  Found %d revision.', '  Found %d revisions.', len(page_revs)),
             len(page_revs),
